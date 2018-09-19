@@ -13,6 +13,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def main():
     # create dam input data
     logger.info('Start reading the input')
@@ -26,4 +27,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
