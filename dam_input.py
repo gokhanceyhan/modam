@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Thu Aug  2 21:07:42 2018
 
@@ -7,9 +5,10 @@ Created on Thu Aug  2 21:07:42 2018
 """
 
 import pandas as pd
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from enum import Enum
-from dam_constants import *
+import dam_constants as dc
+import dam_utils as du
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -17,20 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 class DamData:
-
     def __init__(self):
         self.dam_bids = None
-
     # minimum allowable bid price
     min_price = 0
-
     # maximum allowable bid price
     max_price = 2000
-
     # number of time periods in dam
     number_of_periods = 24
-
     # reading the dam input from the file specified
+
     def read_input(self, file_path):
         """
         Reads input data in the specified path and create dam_bids object
@@ -39,61 +34,55 @@ class DamData:
         """
         # read data as a data frame
         data = pd.read_csv(file_path)
-
         # define bid maps
         bid_id_2_hourly_bid = {}
         bid_id_2_block_bid = {}
         bid_id_2_flexible_bid = {}
-
         # iterate data frame and create bid objects
         for index, row in data.iterrows():
 
-            bid_type = row[DAM_DATA_BID_TYPE_HEADER]
-            bid_id = row[DAM_DATA_BID_ID_HEADER]
-            num_of_periods = row[DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
-            period = row[DAM_DATA_BID_PERIOD_HEADER]
-            price = row[DAM_DATA_BID_PRICE_HEADER]
-            quantity = row[DAM_DATA_BID_QUANTITY_HEADER]
-            link = row[DAM_DATA_BID_LINK_HEADER]
+            bid_type = row[dc.DAM_DATA_BID_TYPE_HEADER]
+            bid_id = row[dc.DAM_DATA_BID_ID_HEADER]
+            num_of_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
+            period = row[dc.DAM_DATA_BID_PERIOD_HEADER]
+            price = row[dc.DAM_DATA_BID_PRICE_HEADER]
+            quantity = row[dc.DAM_DATA_BID_QUANTITY_HEADER]
+            link = row[dc.DAM_DATA_BID_LINK_HEADER]
 
-            if BidType(bid_type) is BidType.BLOCK:
+            if bid_type == BidType.BLOCK:
                 block_bid = BlockBid(bid_id, num_of_periods, period, price,
                                      quantity, link)
                 bid_id_2_block_bid.update({block_bid.bid_id: block_bid})
-
-            elif BidType(bid_type) is BidType.FLEXIBLE:
+            elif bid_type == BidType.FLEXIBLE:
                 flexible_bid = FlexibleBid(bid_id, num_of_periods, price, quantity)
                 bid_id_2_flexible_bid.update({flexible_bid.bid_id: flexible_bid})
-
             elif bid_id not in bid_id_2_hourly_bid:
                 hourly_bid = HourlyBid(bid_id, num_of_periods, period, price,
                                        quantity)
                 bid_id_2_hourly_bid.update({hourly_bid.bid_id: hourly_bid})
-
             else:
                 bid_id_2_hourly_bid[bid_id].add_price_quantity_pair(price, quantity)
-
+        # create simple bids from hourly bids
+        for bid_id, hourly_bid in bid_id_2_hourly_bid.items():
+            hourly_bid.step_id_2_simple_bid = du.create_simple_bids_from_hourly_bid(hourly_bid)
         self.dam_bids = DamBids(bid_id_2_hourly_bid, bid_id_2_block_bid,
                                 bid_id_2_flexible_bid)
-
-    # printing stats for the given dam data
 
 
 class DamBids:
 
-    def __init__(self, hourly_bids, block_bids, flexible_bids):
-        self.hourly_bids = hourly_bids
-        self.block_bids = block_bids
-        self.flexible_bids = flexible_bids
+    def __init__(self, bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid):
+        self.bid_id_2_hourly_bid = bid_id_2_hourly_bid
+        self.bid_id_2_block_bid = bid_id_2_block_bid
+        self.bid_id_2_flexible_bid = bid_id_2_flexible_bid
 
 
-class Bid(ABC):
+class Bid(object):
 
     def __init__(self, bid_id, bid_type, num_period):
         self.bid_id = bid_id
         self.type = bid_type
         self.num_period = num_period
-        super().__init__()
 
     @abstractmethod
     def print_bid(self):
@@ -103,9 +92,19 @@ class Bid(ABC):
 class HourlyBid(Bid):
 
     def __init__(self, bid_id, num_period, period, price, quantity):
-        super().__init__(bid_id, BidType.HOURLY, num_period)
+        """
+        Hourly bid class
+
+        :param bid_id:
+        :param num_period:
+        :param period:
+        :param price:
+        :param quantity:
+        """
+        Bid.__init__(self, bid_id, BidType.HOURLY, num_period)
         self.period = period
         self.price_quantity_pairs = [(price, quantity)]
+        self.step_id_2_simple_bid = None
 
     def add_price_quantity_pair(self, price, quantity):
         """
@@ -123,11 +122,15 @@ class HourlyBid(Bid):
 class BlockBid(Bid):
 
     def __init__(self, bid_id, num_period, period, price, quantity, link):
-        super().__init__(bid_id, BidType.BLOCK, num_period)
+        Bid.__init__(self, bid_id, BidType.BLOCK, num_period)
         self.period = period
         self.price = price
         self.quantity = quantity
         self.link = link
+        if quantity <= 0:
+            self.is_supply = True
+        else:
+            self.is_supply = False
 
     def print_bid(self):
         pass
@@ -136,7 +139,7 @@ class BlockBid(Bid):
 class FlexibleBid(Bid):
 
     def __init__(self, bid_id, num_period, price, quantity):
-        super().__init__(bid_id, BidType.FLEXIBLE, num_period)
+        Bid.__init__(self, bid_id, BidType.FLEXIBLE, num_period)
         self.price = price
         self.quantity = quantity
 
@@ -153,9 +156,9 @@ class BidType(Enum):
 class InputStats:
 
     def __init__(self, dam_data):
-        self.number_of_hourlyBids = len(dam_data.dam_bids.hourly_bids)
-        self.number_of_blockBids = len(dam_data.dam_bids.block_bids)
-        self.number_of_flexibleBids = len(dam_data.dam_bids.flexible_bids)
+        self.number_of_hourlyBids = len(dam_data.dam_bids.bid_id_2_hourly_bid)
+        self.number_of_blockBids = len(dam_data.dam_bids.bid_id_2_block_bid)
+        self.number_of_flexibleBids = len(dam_data.dam_bids.bid_id_2_flexible_bid)
 
     def print_stats(self):
         logger.info('Printing input stats...')

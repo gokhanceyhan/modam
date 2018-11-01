@@ -15,3 +15,4 @@ DAM_DATA_BID_QUANTITY_HEADER = "quantity"
 DAM_DATA_BID_PRICE_HEADER = "price"
 DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER = "num_periods" 
 DAM_DATA_BID_LINK_HEADER = "link"
+OBJ_COMP_TOL = 1  # if the difference between two obj values is less than this, we assume they are equal.
