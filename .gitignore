@@ -1,0 +1,8 @@
+.DS_Store
+*.txt
+*.log
+*.pyc
+*.lp
+*.sol
+venv/
+.idea/
