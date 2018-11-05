@@ -38,7 +38,6 @@ def create_simple_bids_from_hourly_bid(hourly_bid):
 
 
 def is_accepted_block_bid_pab(bid, mcp):
-    mcp = list(mcp.values())
     first = bid.period - 1
     last = bid.period+bid.num_period-1
     mcp_block = mcp[first:last]
@@ -56,7 +55,6 @@ def is_accepted_block_bid_pab(bid, mcp):
 
 
 def is_rejected_block_bid_prb(bid, mcp):
-    mcp = list(mcp.values())
     first = bid.period - 1
     last = bid.period+bid.num_period-1
     mcp_block = mcp[first:last]
@@ -71,3 +69,8 @@ def is_rejected_block_bid_prb(bid, mcp):
             return True
         else:
             return False
+
+
+def calculate_bigm_for_block_bid_loss(block_bid):
+    return abs(block_bid.price * block_bid.quantity)
+

@@ -1,4 +1,3 @@
-#!/usr/bin/python2.7
 # -*- coding: utf-8 -*-
 """
 Created on Thu Aug  2 22:51:21 2018
@@ -31,18 +30,22 @@ def main(filename, problem, solver, method):
     params = ds.SolverParameters(time_limit=10, rel_gap=1e-6)
     if solver is ds.Solver.Gurobi:
         dam_solver = ds.DamSolverGurobi(problem, method, dam_data, params)
-    else:
+    elif solver is ds.Solver.Cplex:
         dam_solver = ds.DamSolverCplex(problem, method, dam_data, params)
+    else:
+        dam_solver = ds.DamSolverScip(problem, method, dam_data, params)
     solution = dam_solver.solve()
-
-    if solution is not None:
+    if solution is None:
+        print('Failed to find a solution')
+        sys.exit(-1)
+    solution.verify(problem, dam_data.dam_bids)
+    if solution.is_valid:
         print('Successfully found a solution!')
     else:
-        print('Failed to find a solution')
+        print('Failed to find a valid solution')
 
 
 def usage():
-    print('Use python2.7 installation')
     print('usage:   dam_main.py filename problem solver method')
     print('problem: {NoPab, NoPrb}')
     print('solver: {gurobi, cplex, scip}')
@@ -70,7 +73,7 @@ if __name__ == "__main__":
         _solver = ds.Solver.Gurobi
     elif sys.argv[3].lower() == 'cplex':
         _solver = ds.Solver.Cplex
-    elif sys.argv[3].lower == 'scip':
+    elif sys.argv[3].lower() == 'scip':
         _solver = ds.Solver.Scip
     else:
         usage()

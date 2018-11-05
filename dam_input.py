@@ -42,18 +42,18 @@ class DamData:
         for index, row in data.iterrows():
 
             bid_type = row[dc.DAM_DATA_BID_TYPE_HEADER]
-            bid_id = row[dc.DAM_DATA_BID_ID_HEADER]
+            bid_id = str(row[dc.DAM_DATA_BID_ID_HEADER])
             num_of_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
             period = row[dc.DAM_DATA_BID_PERIOD_HEADER]
             price = row[dc.DAM_DATA_BID_PRICE_HEADER]
             quantity = row[dc.DAM_DATA_BID_QUANTITY_HEADER]
             link = row[dc.DAM_DATA_BID_LINK_HEADER]
 
-            if bid_type == BidType.BLOCK:
+            if bid_type == BidType.BLOCK.value:
                 block_bid = BlockBid(bid_id, num_of_periods, period, price,
                                      quantity, link)
                 bid_id_2_block_bid.update({block_bid.bid_id: block_bid})
-            elif bid_type == BidType.FLEXIBLE:
+            elif bid_type == BidType.FLEXIBLE.value:
                 flexible_bid = FlexibleBid(bid_id, num_of_periods, price, quantity)
                 bid_id_2_flexible_bid.update({flexible_bid.bid_id: flexible_bid})
             elif bid_id not in bid_id_2_hourly_bid:

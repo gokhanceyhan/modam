@@ -3,7 +3,6 @@ from abc import abstractmethod
 import gurobipy as grb
 import cplex as cpx
 from cplex.callbacks import LazyConstraintCallback
-
 import dam_constants as dc
 import dam_solver as ds
 
@@ -27,6 +26,10 @@ class BendersDecomposition(object):
 
     @abstractmethod
     def _solve_no_prb(self):
+        pass
+
+    @abstractmethod
+    def _get_solution(self):
         pass
 
 
@@ -116,7 +119,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
 
     def solve(self):
         if self.prob_type is ds.ProblemType.NoPab:
-            self._solve_no_pab()
+            return self._solve_no_pab()
 
     def _solve_no_pab(self):
         # create master problem
@@ -138,10 +141,28 @@ class BendersDecompositionGurobi(BendersDecomposition):
         # run benders decomposition
         callback = CallbackGurobi()
         master_prob.solve_model_with_callback(callback.dam_callback)
-        master_prob.solve_fixed_model()
+        if master_prob.model.SolCount >= 1:
+            master_prob.solve_fixed_model()
+            return self._get_solution()
+        else:
+            return None
 
     def _solve_no_prb(self):
         pass
+
+    def _get_solution(self):
+        # fill solution
+        mp = self.master_problem
+        dam_soln = ds.DamSolution()
+        dam_soln.total_surplus = mp.fixed.ObjVal
+        y = mp.fixed.getAttr('X', mp.bid_id_2_bbidvar)
+        for bid_id, value in y.items():
+            if abs(value - 0.0) <= mp.fixed.Params.IntFeasTol:
+                dam_soln.rejected_block_bids.append(bid_id)
+            else:
+                dam_soln.accepted_block_bids.append(bid_id)
+        dam_soln.market_clearing_prices = mp.fixed.getAttr('Pi', mp.period_2_balance_con.values())
+        return dam_soln
 
 
 class MasterProblemGurobi(MasterProblem):
@@ -320,7 +341,7 @@ class BendersDecompositionCplex(BendersDecomposition):
 
     def solve(self):
         if self.prob_type is ds.ProblemType.NoPab:
-            self._solve_no_pab()
+            return self._solve_no_pab()
 
     def _solve_no_pab(self):
         # create master problem
@@ -336,10 +357,29 @@ class BendersDecompositionCplex(BendersDecomposition):
 
         # run benders decomposition
         master_prob.solve_model_with_callback(sub_prob)
-        master_prob.solve_fixed_model()
+        if master_prob.model.solution.pool.get_num() >= 1:
+            master_prob.solve_fixed_model()
+            return self._get_solution()
+        else:
+            return None
 
     def _solve_no_prb(self):
         pass
+
+    def _get_solution(self):
+        mp = self.master_problem
+        solution = mp.fixed.solution
+        # fill dam solution object
+        dam_soln = ds.DamSolution()
+        dam_soln.total_surplus = solution.get_objective_value()
+        for bid_id, var in mp.bid_id_2_bbidvar.items():
+            value = solution.get_values(var)
+            if abs(value - 0.0) <= mp.fixed.parameters.mip.tolerances.integrality.get():
+                dam_soln.rejected_block_bids.append(bid_id)
+            else:
+                dam_soln.accepted_block_bids.append(bid_id)
+        dam_soln.market_clearing_prices = solution.get_dual_values(mp.period_2_balance_con)
+        return dam_soln
 
 
 class MasterProblemCplex(MasterProblem):
@@ -391,8 +431,8 @@ class MasterProblemCplex(MasterProblem):
         senses = ['E'] * self.dam_data.number_of_periods
         rhs = [0.0] * self.dam_data.number_of_periods
         con_names = ['balance_' + str(period) for period in range(1, self.dam_data.number_of_periods + 1, 1)]
-        self.period_2_balance_con = self.model.linear_constraints.add(lin_expr=con_expr, senses=senses, rhs=rhs,
-                                                                      names=con_names)
+        self.model.linear_constraints.add(lin_expr=con_expr, senses=senses, rhs=rhs, names=con_names)
+        self.period_2_balance_con = con_names
 
     def create_model(self):
         # create decision variables
@@ -436,7 +476,7 @@ class MasterProblemCplex(MasterProblem):
         print('callback used ' + str(callback_instance._times_called) + ' times!\n')
 
     def solve_fixed_model(self):
-        self.fixed = cpx.Cplex(self.model)
+        self.fixed = self.model
         self.fixed.set_problem_type(self.fixed.problem_type.fixed_MILP)
         self.fixed.solve()
 
@@ -479,7 +519,7 @@ class SubProblemCplex(SubProblem):
     def solve_model(self):
         # solve model
         self.model.solve()
-        self.objval = self.model.solution.get_objective_value
+        self.objval = self.model.solution.get_objective_value()
 
 
 class LazyConstraintCallbackCplex(LazyConstraintCallback):

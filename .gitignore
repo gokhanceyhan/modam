@@ -3,6 +3,9 @@
 *.log
 *.pyc
 *.lp
+*.mps
+*.prm
 *.sol
 venv/
+damvenv/
 .idea/

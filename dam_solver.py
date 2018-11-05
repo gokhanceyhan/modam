@@ -1,6 +1,7 @@
 from enum import Enum
 from abc import abstractmethod
 import dam_benders as db
+import dam_primaldual as dpd
 import dam_utils as du
 
 
@@ -37,10 +38,6 @@ class DamSolver(object):
     def solve(self):
         pass
 
-    @abstractmethod
-    def _get_solution(self, cont_model, bid_id_2_bbidvar, period_2_balance_con):
-        pass
-
 
 class DamSolverGurobi(DamSolver):
     def __init__(self, prob_type, soln_app, dam_data, solver_params):
@@ -50,33 +47,21 @@ class DamSolverGurobi(DamSolver):
         if self.soln_app is SolutionApproach.Benders:
             dam_soln = self._solve_benders_decomposition()
             return dam_soln
+        elif self.soln_app is SolutionApproach.PrimalDual:
+            dam_soln = self._solve_primal_dual_problem()
+            return dam_soln
 
     def _solve_primal_dual_problem(self):
-        pass
+        dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
+        prob_name = dam_pd.create_model()
+        solver = dpd.PrimalDualGurobiSolver(prob_name, self.solver_params)
+        solution = solver.solve()
+        return solution
 
     def _solve_benders_decomposition(self):
         dam_benders = db.BendersDecompositionGurobi(self.prob_type, self.dam_data, self.solver_params)
-        dam_benders.solve()
-        master = dam_benders.master_problem
-        return self._get_solution(master.fixed, master.bid_id_2_bbidvar, master.period_2_balance_con)
-
-    def _get_solution(self, cont_model, bid_id_2_bbidvar, period_2_balance_con):
-        # fill solution
-        dam_soln = DamSolution()
-        dam_soln.total_surplus = cont_model.ObjVal
-        y = cont_model.getAttr('X', bid_id_2_bbidvar)
-        for bid_id, value in y.items():
-            if abs(value - 0.0) <= cont_model.Params.IntFeasTol:
-                dam_soln.rejected_block_bids.append(bid_id)
-            else:
-                dam_soln.accepted_block_bids.append(bid_id)
-        dam_soln.market_clearing_prices = cont_model.getAttr('Pi', period_2_balance_con)
-        # verify solution
-        dam_soln.verify(ProblemType.NoPab, self.dam_data.dam_bids)
-        if dam_soln.is_valid:
-            return dam_soln
-        else:
-            return None
+        solution = dam_benders.solve()
+        return solution
 
 
 class DamSolverCplex(DamSolver):
@@ -87,34 +72,44 @@ class DamSolverCplex(DamSolver):
         if self.soln_app is SolutionApproach.Benders:
             dam_soln = self._solve_benders_decomposition()
             return dam_soln
+        elif self.soln_app is SolutionApproach.PrimalDual:
+            dam_soln = self._solve_primal_dual_problem()
+            return dam_soln
 
     def _solve_primal_dual_problem(self):
-        pass
+        dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
+        prob_name = dam_pd.create_model()
+        solver = dpd.PrimalDualCplexSolver(prob_name, self.solver_params)
+        solution = solver.solve()
+        return solution
 
     def _solve_benders_decomposition(self):
         dam_benders = db.BendersDecompositionCplex(self.prob_type, self.dam_data, self.solver_params)
-        dam_benders.solve()
-        master = dam_benders.master_problem
-        return self._get_solution(master.fixed, master.bid_id_2_bbidvar, master.period_2_balance_con)
+        solution = dam_benders.solve()
+        return solution
 
-    def _get_solution(self, cont_model, bid_id_2_bbidvar, period_2_balance_con):
-        solution = cont_model.solution
-        # fill dam solution object
-        dam_soln = DamSolution()
-        dam_soln.total_surplus = solution.get_objective_value()
-        for bid_id, var in bid_id_2_bbidvar.values():
-            value = solution.get_values(var)
-            if abs(value - 0.0) <= cont_model.Params.IntFeasTol:
-                dam_soln.rejected_block_bids.append(bid_id)
-            else:
-                dam_soln.accepted_block_bids.append(bid_id)
-        dam_soln.market_clearing_prices = solution.get_dual_values(list(period_2_balance_con.values()))
-        # verify solution
-        dam_soln.verify(ProblemType.NoPab, self.dam_data.dam_bids)
-        if dam_soln.is_valid:
+
+class DamSolverScip(DamSolver):
+    def __init__(self, prob_type, soln_app, dam_data, solver_params):
+        DamSolver.__init__(self, prob_type, soln_app, dam_data, solver_params)
+
+    def solve(self):
+        if self.soln_app is SolutionApproach.Benders:
+            dam_soln = DamSolution()
             return dam_soln
-        else:
-            return None
+        elif self.soln_app is SolutionApproach.PrimalDual:
+            dam_soln = self._solve_primal_dual_problem()
+            return dam_soln
+
+    def _solve_primal_dual_problem(self):
+        dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
+        prob_name = dam_pd.create_model()
+        solver = dpd.PrimalDualScipSolver(prob_name, self.solver_params)
+        solution = solver.solve()
+        return solution
+
+    def _solve_benders_decomposition(self):
+        pass
 
 
 class DamSolution:
