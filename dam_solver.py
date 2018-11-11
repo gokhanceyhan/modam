@@ -95,7 +95,7 @@ class DamSolverScip(DamSolver):
 
     def solve(self):
         if self.soln_app is SolutionApproach.Benders:
-            dam_soln = DamSolution()
+            dam_soln = self._solve_benders_decomposition()
             return dam_soln
         elif self.soln_app is SolutionApproach.PrimalDual:
             dam_soln = self._solve_primal_dual_problem()
@@ -109,7 +109,9 @@ class DamSolverScip(DamSolver):
         return solution
 
     def _solve_benders_decomposition(self):
-        pass
+        dam_benders = db.BendersDecompositionScip(self.prob_type, self.dam_data, self.solver_params)
+        solution = dam_benders.solve()
+        return solution
 
 
 class DamSolution:

@@ -27,7 +27,7 @@ def main(filename, problem, solver, method):
     dam_data_stats.print_stats()
 
     # solve problem
-    params = ds.SolverParameters(time_limit=10, rel_gap=1e-6)
+    params = ds.SolverParameters(time_limit=60, rel_gap=1e-6)
     if solver is ds.Solver.Gurobi:
         dam_solver = ds.DamSolverGurobi(problem, method, dam_data, params)
     elif solver is ds.Solver.Cplex:
