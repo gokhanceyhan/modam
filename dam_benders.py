@@ -6,6 +6,7 @@ from cplex.callbacks import LazyConstraintCallback
 import pyscipopt as scip
 import dam_constants as dc
 import dam_solver as ds
+import dam_utils as du
 
 
 class BendersDecomposition(object):
@@ -94,6 +95,10 @@ class SubProblem(object):
         pass
 
     @abstractmethod
+    def reset_block_bid_bounds(self, *args):
+        pass
+
+    @abstractmethod
     def restrict_rejected_block_bids(self, rejected_block_bids):
         pass
 
@@ -131,6 +136,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
         sub_prob = self.sub_problem
 
         # pass data into callback
+        master_prob.model._dam_data = self.dam_data
         master_prob.model._bid_id_2_bbidvar = master_prob.bid_id_2_bbidvar
         master_prob.model._sp = sub_prob
         master_prob.model._prob = ds.ProblemType.NoPab
@@ -317,6 +323,7 @@ class CallbackGurobi:
     def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
         CallbackGurobi._generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids,
                                                           bid_id_2_bbidvar)
+        # CallbackGurobi._generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod
     def _generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
@@ -330,6 +337,33 @@ class CallbackGurobi:
             bid_var = bid_id_2_bbidvar[bid_id]
             expr.add(bid_var, 1)
         model.cbLazy(expr >= rhs)
+
+    @staticmethod
+    def _generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids):
+        bid_id_2_block_bid = model._dam_data.dam_bids.bid_id_2_block_bid
+        bid_id_2_bbidvar = model._bid_id_2_bbidvar
+        market_clearing_prices = CallbackGurobi._find_market_clearing_prices(model, accepted_block_bids)
+
+        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid)
+        for pab in pabs:
+            variables, coefficients, rhs = du.create_gcut_for_pab(pab, accepted_block_bids, rejected_block_bids,
+                                                                  bid_id_2_block_bid, bid_id_2_bbidvar)
+            expr = grb.LinExpr(0.0)
+            expr.addTerms(coefficients, variables)
+            model.cbLazy(expr >= rhs)
+
+    @staticmethod
+    def _find_market_clearing_prices(model, accepted_block_bids):
+        # solve sub-problem again to obtain dual values
+        # restrict accepted block bids as well
+        sp = model._sp
+        dam_data = model._dam_data
+        sp.restrict_accepted_block_bids(accepted_block_bids)
+        sp.solve_model()
+        balance_constraints = [sp.model.getConstrByName('balance_' + str(period))
+                               for period in range(1, dam_data.number_of_periods + 1, 1)]
+        market_clearing_prices = sp.model.getAttr('Pi', balance_constraints)
+        return market_clearing_prices
 
 
 class BendersDecompositionCplex(BendersDecomposition):
@@ -564,16 +598,16 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         rhs = 1 - len(accepted_block_bids)
         self.add(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=rhs)
 
-    def _generate_combinatorial_cut_madani_no_pab(self, rejected_block_bids):
-        ind = rejected_block_bids
-        coeff = [1] * len(rejected_block_bids)
-        self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=0)
-
-    def _generate_combinatorial_cut_madani_no_prb(self, accepted_block_bids):
+    def _generate_combinatorial_cut_madani_no_pab(self, accepted_block_bids):
         ind = accepted_block_bids
         coeff = [-1] * len(accepted_block_bids)
         rhs = 1 - len(accepted_block_bids)
         self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=rhs)
+
+    def _generate_combinatorial_cut_madani_no_prb(self, rejected_block_bids):
+        ind = rejected_block_bids
+        coeff = [1] * len(rejected_block_bids)
+        self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=0)
 
 
 class BendersDecompositionScip(BendersDecomposition):
@@ -885,19 +919,7 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
             coeffs.append(1)
         model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) >= rhs)
 
-    def _generate_combinatorial_cut_madani_no_pab(self, rejected_block_bids):
-        model = self.model
-        bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
-        variables = []
-        coeffs = []
-        rhs = 1
-        for bid_id in rejected_block_bids:
-            bid_var = bid_id_2_bbidvar[bid_id]
-            variables.append(bid_var)
-            coeffs.append(1)
-        model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) >= rhs, local=True)
-
-    def _generate_combinatorial_cut_madani_no_prb(self, accepted_block_bids):
+    def _generate_combinatorial_cut_madani_no_pab(self, accepted_block_bids):
         model = self.model
         bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
         variables = []
@@ -908,6 +930,18 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
             variables.append(bid_var)
             coeffs.append(-1)
             rhs -= 1
+        model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) >= rhs, local=True)
+
+    def _generate_combinatorial_cut_madani_no_prb(self, rejected_block_bids):
+        model = self.model
+        bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
+        variables = []
+        coeffs = []
+        rhs = 1
+        for bid_id in rejected_block_bids:
+            bid_var = bid_id_2_bbidvar[bid_id]
+            variables.append(bid_var)
+            coeffs.append(1)
         model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) >= rhs, local=True)
 
     def conscheck(self, constraints, solution, check_integrality, check_lp_rows, print_reason, completely):

@@ -74,3 +74,80 @@ def is_rejected_block_bid_prb(bid, mcp):
 def calculate_bigm_for_block_bid_loss(block_bid):
     return abs(block_bid.price * block_bid.quantity)
 
+
+def do_block_bids_have_common_period(this_block_bid, that_block_bid):
+    this_block_bid_periods = range(this_block_bid.period, this_block_bid.period + this_block_bid.num_period, 1)
+    that_block_bid_periods = range(that_block_bid.period, that_block_bid.period + that_block_bid.num_period, 1)
+    return len(set(this_block_bid_periods).intersection(set(that_block_bid_periods))) > 0
+
+
+def find_pabs(market_clearing_prices, accepted_block_bid_ids, bid_id_2_block_bid):
+    pabs = []
+    for accepted_block_bid_id in accepted_block_bid_ids:
+        accepted_block_bid = bid_id_2_block_bid[accepted_block_bid_id]
+        if is_accepted_block_bid_pab(accepted_block_bid, market_clearing_prices):
+            pabs.append(accepted_block_bid)
+    return pabs
+
+
+def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
+
+    if pab.is_supply:
+        variables, coefficients, rhs = create_gcut_for_supply_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids,
+                                                                  bid_id_2_block_bid, bid_id_2_bbid_var)
+    else:
+        variables, coefficients, rhs = create_gcut_for_demand_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids,
+                                                                  bid_id_2_block_bid, bid_id_2_bbid_var)
+    return variables, coefficients, rhs
+
+
+def create_gcut_for_supply_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid,
+                               bid_id_2_bbid_var):
+    variables = [bid_id_2_bbid_var[pab.bid_id]]
+    coefficients = [-1]
+    rhs = 0
+    accepted_supply_block_bid_ids = [bid_id for bid_id in accepted_block_bid_ids if bid_id != pab.bid_id
+                                     and bid_id_2_block_bid[bid_id].is_supply]
+    rejected_demand_block_bid_ids = [bid_id for bid_id in rejected_block_bid_ids if bid_id != pab.bid_id
+                                     and not bid_id_2_block_bid[bid_id].is_supply]
+    # find intersecting accepted supply block bids
+    for bbid_id in accepted_supply_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(pab, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(-1)
+            rhs -= 1
+    # find intersecting rejected demand block bids
+    for bbid_id in rejected_demand_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(pab, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(1)
+    return variables, coefficients, rhs
+
+
+def create_gcut_for_demand_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid,
+                               bid_id_2_bbid_var):
+    variables = [bid_id_2_bbid_var[pab.bid_id]]
+    coefficients = [-1]
+    rhs = 0
+    accepted_demand_block_bid_ids = [bid_id for bid_id in accepted_block_bid_ids if bid_id != pab.bid_id
+                                     and not bid_id_2_block_bid[bid_id].is_supply]
+    rejected_supply_block_bid_ids = [bid_id for bid_id in rejected_block_bid_ids if bid_id != pab.bid_id
+                                     and bid_id_2_block_bid[bid_id].is_supply]
+    # find intersecting accepted demand block bids
+    for bbid_id in accepted_demand_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(pab, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(-1)
+            rhs -= 1
+    # find intersecting rejected supply block bids
+    for bbid_id in rejected_supply_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(pab, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(1)
+    return variables, coefficients, rhs
+
+
