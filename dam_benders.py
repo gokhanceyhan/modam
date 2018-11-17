@@ -323,7 +323,8 @@ class CallbackGurobi:
     def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
         CallbackGurobi._generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids,
                                                           bid_id_2_bbidvar)
-        # CallbackGurobi._generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids)
+        if model._prob is ds.ProblemType.NoPab:
+            CallbackGurobi._generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod
     def _generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
@@ -360,6 +361,7 @@ class CallbackGurobi:
         dam_data = model._dam_data
         sp.restrict_accepted_block_bids(accepted_block_bids)
         sp.solve_model()
+        # TODO: replace 'balance_' with a defined constant
         balance_constraints = [sp.model.getConstrByName('balance_' + str(period))
                                for period in range(1, dam_data.number_of_periods + 1, 1)]
         market_clearing_prices = sp.model.getAttr('Pi', balance_constraints)
@@ -367,6 +369,9 @@ class CallbackGurobi:
 
 
 class BendersDecompositionCplex(BendersDecomposition):
+    """
+    Note: Block bid variable indices are communicated across the class instead of bid_ids and variables.
+    """
     def __init__(self, prob_type, dam_data, solver_params):
         BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
 
@@ -400,6 +405,7 @@ class BendersDecompositionCplex(BendersDecomposition):
     def _get_solution(self):
         mp = self.master_problem
         solution = mp.fixed.solution
+        # solution.write('solution.sol')
         # fill dam solution object
         dam_soln = ds.DamSolution()
         dam_soln.total_surplus = solution.get_objective_value()
@@ -493,11 +499,16 @@ class MasterProblemCplex(MasterProblem):
         # register callback
         callback_instance = self.model.register_callback(LazyConstraintCallbackCplex)
         # create callback attributes
+        callback_instance._dam_data = self.dam_data
         callback_instance._sp = sub_prob
         callback_instance._prob = ds.ProblemType.NoPab
         callback_instance._times_called = 0
-        block_bids = [ind for name, ind in self.name_2_ind.items() if name in self.bid_id_2_bbidvar.values()]
-        callback_instance._block_bids = block_bids
+        bid_id_2_bbid_var_index = {}
+        for bid_id, bbid_var in self.bid_id_2_bbidvar.items():
+            index = self.name_2_ind[bbid_var]
+            bid_id_2_bbid_var_index[bid_id] = index
+        callback_instance._bid_id_2_bbid_var_index = bid_id_2_bbid_var_index
+
         # turnoff some parameters due to use of callbacks
         self.model.parameters.threads.set(1)
         self.model.parameters.preprocessing.presolve.set(self.model.parameters.preprocessing.presolve.values.off)
@@ -522,6 +533,7 @@ class SubProblemCplex(SubProblem):
         SubProblem.__init__(self)
         self.model = cpx.Cplex(master_problem.model)
         self.model.set_problem_type(self.model.problem_type.LP)
+        self.write_model()
         # set parameters
         self.model.set_log_stream(None)
         self.model.set_results_stream(None)
@@ -558,26 +570,27 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
     def __call__(self):
         # update counter
         self._times_called += 1
-        block_bids = self._block_bids
+        bid_id_2_bbid_var_index = self._bid_id_2_bbid_var_index
         sp = self._sp
         prob = self._prob
         # query node obj value
         node_obj = self.get_objective_value()
         # query node solution
-        accepted_block_bids = []
-        rejected_block_bids = []
-        for ind in block_bids:
+        accepted_block_bids = {}
+        rejected_block_bids = {}
+        for bid_id, ind in bid_id_2_bbid_var_index.items():
             value = self.get_values(ind)
+            # TODO: replace the constant with the model parameter value
             if abs(value - 0.0) <= 0.00001:
-                rejected_block_bids.append(ind)
+                rejected_block_bids[bid_id] = ind
             else:
-                accepted_block_bids.append(ind)
+                accepted_block_bids[bid_id] = ind
         # update sub problem
-        sp.reset_block_bid_bounds(block_bids)
+        sp.reset_block_bid_bounds(bid_id_2_bbid_var_index.values())
         if prob is ds.ProblemType.NoPab:
-            sp.restrict_rejected_block_bids(rejected_block_bids)
+            sp.restrict_rejected_block_bids(rejected_block_bids.values())
         elif prob is ds.ProblemType.NoPrb:
-            sp.restrict_accepted_block_bids(accepted_block_bids)
+            sp.restrict_accepted_block_bids(accepted_block_bids.values())
         # solve sub problem
         sp.solve_model()
         # assess if the current node solution is valid
@@ -586,11 +599,14 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
             self._generate_lazy_cuts(accepted_block_bids, rejected_block_bids)
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids):
-        self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
-        if self._prob is ds.ProblemType.NoPab:
-            self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
-        elif self._prob is ds.ProblemType.NoPrb:
-            self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
+        prob_type = self._prob
+        # self._generate_combinatorial_cut_martin(list(accepted_block_bids.values()),
+        #                                         list(rejected_block_bids.values()))
+        if prob_type is ds.ProblemType.NoPab:
+            self._generate_combinatorial_cut_madani_no_pab(list(rejected_block_bids.values()))
+            self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+        elif prob_type is ds.ProblemType.NoPrb:
+            self._generate_combinatorial_cut_madani_no_prb(list(accepted_block_bids.values()))
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
         ind = accepted_block_bids + rejected_block_bids
@@ -608,6 +624,30 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         ind = rejected_block_bids
         coeff = [1] * len(rejected_block_bids)
         self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=0)
+
+    def _generate_gcuts_for_no_pab(self, accepted_block_bids, rejected_block_bids):
+        bid_id_2_block_bid = self._dam_data.dam_bids.bid_id_2_block_bid
+        bid_id_2_bbid_var_index = self._bid_id_2_bbid_var_index
+        market_clearing_prices = self._find_market_clearing_prices(list(accepted_block_bids.values()))
+
+        pabs = du.find_pabs(market_clearing_prices, list(accepted_block_bids.keys()), bid_id_2_block_bid)
+        for pab in pabs:
+            variables, coefficients, rhs = du.create_gcut_for_pab(pab, list(accepted_block_bids.keys()),
+                                                                  list(rejected_block_bids.keys()), bid_id_2_block_bid,
+                                                                  bid_id_2_bbid_var_index)
+            self.add(constraint=cpx.SparsePair(variables, coefficients), sense='G', rhs=rhs)
+
+    def _find_market_clearing_prices(self, accepted_block_bids):
+        # solve sub-problem again to obtain dual values
+        # restrict accepted block bids as well
+        sp = self._sp
+        dam_data = self._dam_data
+        sp.restrict_accepted_block_bids(accepted_block_bids)
+        sp.solve_model()
+        solution = sp.model.solution
+        market_clearing_prices = solution.get_dual_values(['balance_' + str(period)
+                                                           for period in range(1, dam_data.number_of_periods + 1, 1)])
+        return market_clearing_prices
 
 
 class BendersDecompositionScip(BendersDecomposition):
