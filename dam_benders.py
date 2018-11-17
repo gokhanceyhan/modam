@@ -652,8 +652,8 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
 
 class BendersDecompositionScip(BendersDecomposition):
 
-    CallbackData = namedtuple('CallbackData',
-                              ['bid_id_2_bbidvar', 'sp', 'prob_type', 'times_called_lazy', 'times_added_cut'])
+    CallbackData = namedtuple(
+        'CallbackData', ['dam_data', 'bid_id_2_bbidvar', 'sp', 'prob_type', 'times_called_lazy', 'times_added_cut'])
 
     def __init__(self, prob_type, dam_data, solver_params):
         BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
@@ -678,8 +678,9 @@ class BendersDecompositionScip(BendersDecomposition):
         # pass data into callback
         # stores the given info in the 'data' attribute of scip model
 
-        callback_data = self.CallbackData(bid_id_2_bbidvar=master_prob.bid_id_2_bbidvar, sp=sub_prob,
-                                          prob_type=ds.ProblemType.NoPab, times_called_lazy=0, times_added_cut=0)
+        callback_data = self.CallbackData(dam_data=self.dam_data, bid_id_2_bbidvar=master_prob.bid_id_2_bbidvar,
+                                          sp=sub_prob, prob_type=ds.ProblemType.NoPab, times_called_lazy=0,
+                                          times_added_cut=0)
 
         # run benders decomposition
         constraint_handler = LazyConstraintCallbackScip()
@@ -851,6 +852,11 @@ class SubProblemScip(SubProblem):
         self.model = copy_master.model
         # assign block bid dictionary to the data member of the subproblem
         self.model.data = copy_master.bid_id_2_bbidvar
+        # set the following parameters to get dual information
+        self.model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
+        self.model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
+        self.model.disablePropagation()
+        self.model.hideOutput()
         self.objval = None
 
     def reset_block_bid_bounds(self):
@@ -882,8 +888,6 @@ class SubProblemScip(SubProblem):
         self.model.writeProblem('sub.lp')
 
     def solve_model(self):
-        # set parameters
-        self.model.hideOutput()
         # solve model
         self.model.optimize()
         self.objval = self.model.getObjVal()
@@ -894,7 +898,7 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         """Do not add cut if this method is called by conscheck(check_only=True)"""
         model = self.model
         callback_data = model.data
-        bid_id_2_bbidvar, sp, prob_type, times_called_lazy, times_added_cut = callback_data
+        dam_data, bid_id_2_bbidvar, sp, prob_type, times_called_lazy, times_added_cut = callback_data
         cuts_added = False
         accepted_block_bids = []
         rejected_block_bids = []
@@ -926,25 +930,28 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
             if not check_only:
                 # add lazy constraint to cut this solution
                 self._generate_lazy_cuts(accepted_block_bids, rejected_block_bids, prob_type)
+                # TODO: account for multiple cuts in gcuts
                 times_added_cut = times_added_cut + 1
 
         # update callback data
-        callback_data = BendersDecompositionScip.CallbackData(bid_id_2_bbidvar=bid_id_2_bbidvar, sp=sp,
-                                                              prob_type=prob_type, times_called_lazy=times_called_lazy,
+        callback_data = BendersDecompositionScip.CallbackData(dam_data=dam_data, bid_id_2_bbidvar=bid_id_2_bbidvar,
+                                                              sp=sp, prob_type=prob_type,
+                                                              times_called_lazy=times_called_lazy,
                                                               times_added_cut=times_added_cut)
         model.data = callback_data
         return cuts_added
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids, prob):
-        self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
+        # self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
         if prob is ds.ProblemType.NoPab:
-            self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
+            # self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
+            self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
         elif prob is ds.ProblemType.NoPrb:
             self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
         model = self.model
-        bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
+        dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
         variables = []
         coeffs = []
         rhs = 1
@@ -961,7 +968,7 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
 
     def _generate_combinatorial_cut_madani_no_pab(self, accepted_block_bids):
         model = self.model
-        bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
+        dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
         variables = []
         coeffs = []
         rhs = 1
@@ -974,7 +981,7 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
 
     def _generate_combinatorial_cut_madani_no_prb(self, rejected_block_bids):
         model = self.model
-        bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
+        dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
         variables = []
         coeffs = []
         rhs = 1
@@ -983,6 +990,31 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
             variables.append(bid_var)
             coeffs.append(1)
         model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) >= rhs, local=True)
+
+    def _generate_gcuts_for_no_pab(self, accepted_block_bids, rejected_block_bids):
+        model = self.model
+        dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
+        bid_id_2_block_bid = dam_data.dam_bids.bid_id_2_block_bid
+        market_clearing_prices = self._find_market_clearing_prices(accepted_block_bids)
+
+        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid)
+        for pab in pabs:
+            variables, coefficients, rhs = du.create_gcut_for_pab(pab, accepted_block_bids, rejected_block_bids,
+                                                                  bid_id_2_block_bid, bid_id_2_bbidvar)
+            model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coefficients)) >= rhs)
+
+    def _find_market_clearing_prices(self, accepted_block_bids):
+        # solve sub-problem again to obtain dual values
+        # restrict accepted block bids as well
+        model = self.model
+        dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
+        sp.model.freeTransform()
+        sp.restrict_accepted_block_bids(accepted_block_bids)
+        sp.solve_model()
+        # TODO: replace 'balance_' with a defined constant
+        market_clearing_prices = [model.getDualsolLinear(con) for con in model.getConss()
+                                  if con.name.find('balance') != -1]
+        return market_clearing_prices[:dam_data.number_of_periods]
 
     def conscheck(self, constraints, solution, check_integrality, check_lp_rows, print_reason, completely):
         if self._add_cut(check_only=True, sol=solution):
