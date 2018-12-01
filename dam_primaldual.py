@@ -169,7 +169,11 @@ class PrimalDualSolver(object):
         pass
 
     @abstractmethod
-    def _get_solution(self):
+    def _get_best_solution(self):
+        pass
+
+    @abstractmethod
+    def _get_solver_output(self, *args):
         pass
 
 
@@ -181,17 +185,14 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
     def solve(self):
         self._set_params()
         self.model.optimize()
-        if self.model.SolCount >= 1:
-            return self._get_solution()
-        else:
-            return None
+        return self._get_solver_output()
 
     def _set_params(self):
         self.model.Params.LogToConsole = 0
         self.model.Params.MIPGap = self.solver_params.rel_gap
         self.model.Params.TimeLimit = self.solver_params.time_limit
 
-    def _get_solution(self):
+    def _get_best_solution(self):
         # fill solution
         dam_soln = ds.DamSolution()
         dam_soln.total_surplus = self.model.ObjVal
@@ -206,6 +207,24 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         dam_soln.market_clearing_prices = [x.X for x in self.model.getVars() if x.VarName.find('pi') != -1]
         return dam_soln
 
+    def _get_solver_output(self):
+        # collect optimization stats
+        elapsed_time = self.model.Runtime
+        number_of_solutions = self.model.SolCount
+        number_of_nodes = self.model.NodeCount
+        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        # collect optimization status
+        status = self.model.Status
+        best_bound = self.model.ObjBound
+        mip_relative_gap = self.model.MIPGap
+        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        # best solution query
+        if number_of_solutions >= 1:
+            best_solution = self._get_best_solution()
+        else:
+            best_solution = None
+        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+
 
 class PrimalDualCplexSolver(PrimalDualSolver):
     def __init__(self, prob_name, solver_params):
@@ -215,11 +234,11 @@ class PrimalDualCplexSolver(PrimalDualSolver):
 
     def solve(self):
         self._set_params()
+        start_time = self.model.get_time()
         self.model.solve()
-        if self.model.solution.pool.get_num() >= 1:
-            return self._get_solution()
-        else:
-            return None
+        end_time = self.model.get_time()
+        elapsed_time = end_time - start_time
+        return self._get_solver_output(elapsed_time)
 
     def _set_params(self):
         self.model.parameters.mip.tolerances.mipgap.set(self.solver_params.rel_gap)
@@ -228,7 +247,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         self.model.set_results_stream('cplex.log')
         self.model.set_warning_stream('cplex.log')
 
-    def _get_solution(self):
+    def _get_best_solution(self):
         solution = self.model.solution
         # fill dam solution object
         dam_soln = ds.DamSolution()
@@ -246,6 +265,25 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         dam_soln.market_clearing_prices = pi
         return dam_soln
 
+    def _get_solver_output(self, elapsed_time):
+        solution = self.model.solution
+        # collect optimization stats
+        elapsed_time = elapsed_time
+        number_of_solutions = solution.pool.get_num()
+        number_of_nodes = solution.progress.get_num_nodes_processed()
+        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        # collect optimization status
+        status = solution.get_status()
+        best_bound = solution.MIP.get_best_objective()
+        mip_relative_gap = solution.MIP.get_mip_relative_gap()
+        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        # best solution query
+        if number_of_solutions >= 1:
+            best_solution = self._get_best_solution()
+        else:
+            best_solution = None
+        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+
 
 class PrimalDualScipSolver(PrimalDualSolver):
     def __init__(self, prob_name, solver_params):
@@ -256,17 +294,14 @@ class PrimalDualScipSolver(PrimalDualSolver):
     def solve(self):
         self._set_params()
         self.model.optimize()
-        if len(self.model.getSols()) >= 1:
-            return self._get_solution()
-        else:
-            return None
+        return self._get_solver_output()
 
     def _set_params(self):
         self.model.setRealParam('limits/gap', self.solver_params.rel_gap)
         self.model.setRealParam('limits/time', self.solver_params.time_limit)
         # self.model.hideOutput()
 
-    def _get_solution(self):
+    def _get_best_solution(self):
         model = self.model
         # fill dam solution object
         dam_soln = ds.DamSolution()
@@ -281,3 +316,22 @@ class PrimalDualScipSolver(PrimalDualSolver):
                 dam_soln.accepted_block_bids.append(bid_id)
         dam_soln.market_clearing_prices = [model.getVal(x) for x in model.getVars() if x.name.find('pi') != -1]
         return dam_soln
+
+    def _get_solver_output(self):
+        # collect optimization stats
+        model = self.model
+        elapsed_time = model.getSolvingTime()
+        number_of_solutions = len(model.getSols())
+        number_of_nodes = model.getNNodes()
+        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        # collect optimization status
+        status = model.getStatus()
+        best_bound = model.getDualbound()
+        mip_relative_gap = model.getGap()
+        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        # best solution query
+        if number_of_solutions >= 1:
+            best_solution = self._get_best_solution()
+        else:
+            best_solution = None
+        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)

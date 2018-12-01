@@ -27,17 +27,18 @@ def main(filename, problem, solver, method):
     dam_data_stats.print_stats()
 
     # solve problem
-    params = ds.SolverParameters(time_limit=60, rel_gap=1e-6)
+    params = ds.SolverParameters(time_limit=10, rel_gap=1e-4)
     if solver is ds.Solver.Gurobi:
         dam_solver = ds.DamSolverGurobi(problem, method, dam_data, params)
     elif solver is ds.Solver.Cplex:
         dam_solver = ds.DamSolverCplex(problem, method, dam_data, params)
     else:
         dam_solver = ds.DamSolverScip(problem, method, dam_data, params)
-    solution = dam_solver.solve()
-    if solution is None:
+    output = dam_solver.solve()
+    if output.optimization_stats().number_of_solutions() == 0:
         print('Failed to find a solution')
         sys.exit(-1)
+    solution = output.dam_solution()
     solution.verify(problem, dam_data.dam_bids)
     if solution.is_valid:
         print('Successfully found a solution!')

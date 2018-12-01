@@ -31,7 +31,11 @@ class BendersDecomposition(object):
         pass
 
     @abstractmethod
-    def _get_solution(self):
+    def _get_best_solution(self):
+        pass
+
+    @abstractmethod
+    def _get_solver_output(self, *args):
         pass
 
 
@@ -140,20 +144,18 @@ class BendersDecompositionGurobi(BendersDecomposition):
         master_prob.model._bid_id_2_bbidvar = master_prob.bid_id_2_bbidvar
         master_prob.model._sp = sub_prob
         master_prob.model._prob = ds.ProblemType.NoPab
+        master_prob.model._num_of_subproblems = 0
+        master_prob.model._num_of_user_cuts = 0
 
         # run benders decomposition
         callback = CallbackGurobi()
         master_prob.solve_model_with_callback(callback.dam_callback)
-        if master_prob.model.SolCount >= 1:
-            master_prob.solve_fixed_model()
-            return self._get_solution()
-        else:
-            return None
+        return self._get_solver_output()
 
     def _solve_no_prb(self):
         pass
 
-    def _get_solution(self):
+    def _get_best_solution(self):
         # fill solution
         mp = self.master_problem
         dam_soln = ds.DamSolution()
@@ -166,6 +168,32 @@ class BendersDecompositionGurobi(BendersDecomposition):
                 dam_soln.accepted_block_bids.append(bid_id)
         dam_soln.market_clearing_prices = mp.fixed.getAttr('Pi', mp.period_2_balance_con.values())
         return dam_soln
+
+    def _get_solver_output(self):
+        # collect optimization stats
+        model = self.master_problem.model
+        elapsed_time = model.Runtime
+        number_of_solutions = model.SolCount
+        number_of_nodes = model.NodeCount
+        number_of_subproblems_solved = model._num_of_subproblems
+        number_of_user_cuts_added = model._num_of_user_cuts
+        benders_stats = ds.BendersDecompositionStats(
+            number_of_user_cuts_added=number_of_user_cuts_added,
+            number_of_subproblems_solved=number_of_subproblems_solved)
+        optimization_stats = ds.OptimizationStats(
+            elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
+        # collect optimization status
+        status = model.Status
+        best_bound = model.ObjBound
+        mip_relative_gap = model.MIPGap
+        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        # best solution query
+        if number_of_solutions >= 1:
+            self.master_problem.solve_fixed_model()
+            best_solution = self._get_best_solution()
+        else:
+            best_solution = None
+        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class MasterProblemGurobi(MasterProblem):
@@ -313,6 +341,7 @@ class CallbackGurobi:
                 model._sp.restrict_accepted_block_bids(accepted_block_bids)
             # solve sub problem
             model._sp.solve_model()
+            model._num_of_subproblems += 1
             # assess if the current node solution is valid
             if model._sp.objval > node_obj + dc.OBJ_COMP_TOL:
                 # add lazy constraint to cut this solution
@@ -338,6 +367,7 @@ class CallbackGurobi:
             bid_var = bid_id_2_bbidvar[bid_id]
             expr.add(bid_var, 1)
         model.cbLazy(expr >= rhs)
+        model._num_of_user_cuts += 1
 
     @staticmethod
     def _generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids):
@@ -352,6 +382,7 @@ class CallbackGurobi:
             expr = grb.LinExpr(0.0)
             expr.addTerms(coefficients, variables)
             model.cbLazy(expr >= rhs)
+            model._num_of_user_cuts += 1
 
     @staticmethod
     def _find_market_clearing_prices(model, accepted_block_bids):
@@ -392,17 +423,16 @@ class BendersDecompositionCplex(BendersDecomposition):
         sub_prob = self.sub_problem
 
         # run benders decomposition
+        start_time = master_prob.model.get_time()
         master_prob.solve_model_with_callback(sub_prob)
-        if master_prob.model.solution.pool.get_num() >= 1:
-            master_prob.solve_fixed_model()
-            return self._get_solution()
-        else:
-            return None
+        end_time = master_prob.model.get_time()
+        elapsed_time = end_time - start_time
+        return self._get_solver_output(elapsed_time)
 
     def _solve_no_prb(self):
         pass
 
-    def _get_solution(self):
+    def _get_best_solution(self):
         mp = self.master_problem
         solution = mp.fixed.solution
         # solution.write('solution.sol')
@@ -418,12 +448,41 @@ class BendersDecompositionCplex(BendersDecomposition):
         dam_soln.market_clearing_prices = solution.get_dual_values(mp.period_2_balance_con)
         return dam_soln
 
+    def _get_solver_output(self, elapsed_time):
+        master_problem = self.master_problem
+        model = master_problem.model
+        solution = model.solution
+        # collect optimization stats
+        elapsed_time = elapsed_time
+        number_of_solutions = solution.pool.get_num()
+        number_of_nodes = solution.progress.get_num_nodes_processed()
+        number_of_subproblems_solved = master_problem.callback_instance._times_called
+        number_of_user_cuts_added = master_problem.callback_instance._cuts_added
+        benders_stats = ds.BendersDecompositionStats(
+            number_of_user_cuts_added=number_of_user_cuts_added,
+            number_of_subproblems_solved=number_of_subproblems_solved)
+        optimization_stats = ds.OptimizationStats(
+            elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
+        # collect optimization status
+        status = solution.get_status()
+        best_bound = solution.MIP.get_best_objective()
+        mip_relative_gap = solution.MIP.get_mip_relative_gap()
+        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        # best solution query
+        if number_of_solutions >= 1:
+            master_problem.solve_fixed_model()
+            best_solution = self._get_best_solution()
+        else:
+            best_solution = None
+        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+
 
 class MasterProblemCplex(MasterProblem):
     def __init__(self, dam_data):
         MasterProblem.__init__(self, dam_data)
         self.model = cpx.Cplex()
         self.name_2_ind = None
+        self.callback_instance = None
 
     def _create_hbidvars(self):
         model = self.model
@@ -503,19 +562,19 @@ class MasterProblemCplex(MasterProblem):
         callback_instance._sp = sub_prob
         callback_instance._prob = ds.ProblemType.NoPab
         callback_instance._times_called = 0
+        callback_instance._cuts_added = 0
         bid_id_2_bbid_var_index = {}
         for bid_id, bbid_var in self.bid_id_2_bbidvar.items():
             index = self.name_2_ind[bbid_var]
             bid_id_2_bbid_var_index[bid_id] = index
         callback_instance._bid_id_2_bbid_var_index = bid_id_2_bbid_var_index
-
+        self.callback_instance = callback_instance
         # turnoff some parameters due to use of callbacks
         self.model.parameters.threads.set(1)
         self.model.parameters.preprocessing.presolve.set(self.model.parameters.preprocessing.presolve.values.off)
         self.model.parameters.mip.strategy.search.set(self.model.parameters.mip.strategy.search.values.traditional)
         # solve
         self.model.solve()
-        print('callback used ' + str(callback_instance._times_called) + ' times!\n')
 
     def solve_fixed_model(self):
         self.fixed = self.model
@@ -613,17 +672,20 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         coeff = [-1] * len(accepted_block_bids) + [1] * len(rejected_block_bids)
         rhs = 1 - len(accepted_block_bids)
         self.add(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=rhs)
+        self._cuts_added += 1
 
     def _generate_combinatorial_cut_madani_no_pab(self, accepted_block_bids):
         ind = accepted_block_bids
         coeff = [-1] * len(accepted_block_bids)
         rhs = 1 - len(accepted_block_bids)
         self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=rhs)
+        self._cuts_added += 1
 
     def _generate_combinatorial_cut_madani_no_prb(self, rejected_block_bids):
         ind = rejected_block_bids
         coeff = [1] * len(rejected_block_bids)
         self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=0)
+        self._cuts_added += 1
 
     def _generate_gcuts_for_no_pab(self, accepted_block_bids, rejected_block_bids):
         bid_id_2_block_bid = self._dam_data.dam_bids.bid_id_2_block_bid
@@ -636,6 +698,7 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
                                                                   list(rejected_block_bids.keys()), bid_id_2_block_bid,
                                                                   bid_id_2_bbid_var_index)
             self.add(constraint=cpx.SparsePair(variables, coefficients), sense='G', rhs=rhs)
+            self._cuts_added += 1
 
     def _find_market_clearing_prices(self, accepted_block_bids):
         # solve sub-problem again to obtain dual values
@@ -657,6 +720,7 @@ class BendersDecompositionScip(BendersDecomposition):
 
     def __init__(self, prob_type, dam_data, solver_params):
         BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
+        self.callback = None
 
     def solve(self):
         if self.prob_type is ds.ProblemType.NoPab:
@@ -669,33 +733,25 @@ class BendersDecompositionScip(BendersDecomposition):
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
-
         # create sub problem
         self.sub_problem = SubProblemScip(self.dam_data)
         sub_prob = self.sub_problem
         sub_prob.write_model()
-
         # pass data into callback
         # stores the given info in the 'data' attribute of scip model
-
         callback_data = self.CallbackData(dam_data=self.dam_data, bid_id_2_bbidvar=master_prob.bid_id_2_bbidvar,
                                           sp=sub_prob, prob_type=ds.ProblemType.NoPab, times_called_lazy=0,
                                           times_added_cut=0)
-
+        self.callback = callback_data
         # run benders decomposition
         constraint_handler = LazyConstraintCallbackScip()
         master_prob.solve_model_with_callback(constraint_handler, callback_data)
-
-        if len(master_prob.model.getSols()) >= 1:
-            master_prob.solve_fixed_model()
-            return self._get_solution()
-        else:
-            return None
+        return self._get_solver_output()
 
     def _solve_no_prb(self):
         pass
 
-    def _get_solution(self):
+    def _get_best_solution(self):
         model = self.master_problem.fixed
         # fill dam solution object
         dam_soln = ds.DamSolution()
@@ -712,6 +768,33 @@ class BendersDecompositionScip(BendersDecomposition):
             market_clearing_prices.append(mcp)
         dam_soln.market_clearing_prices = market_clearing_prices
         return dam_soln
+
+    def _get_solver_output(self):
+        # collect optimization stats
+        master_problem = self.master_problem
+        model = master_problem.model
+        elapsed_time = model.getSolvingTime()
+        number_of_solutions = len(model.getSols())
+        number_of_nodes = model.getNNodes()
+        number_of_subproblems_solved = model.data.times_called_lazy
+        number_of_user_cuts_added = model.data.times_added_cut
+        benders_stats = ds.BendersDecompositionStats(
+            number_of_user_cuts_added=number_of_subproblems_solved,
+            number_of_subproblems_solved=number_of_user_cuts_added)
+        optimization_stats = ds.OptimizationStats(
+            elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
+        # collect optimization status
+        status = model.getStatus()
+        best_bound = model.getDualbound()
+        mip_relative_gap = model.getGap()
+        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        # best solution query
+        if number_of_solutions >= 1:
+            master_problem.solve_fixed_model()
+            best_solution = self._get_best_solution()
+        else:
+            best_solution = None
+        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class MasterProblemScip(MasterProblem):
@@ -810,8 +893,6 @@ class MasterProblemScip(MasterProblem):
         self.model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         self.model.setBoolParam("misc/allowdualreds", 0)
         self.model.optimize()
-        print('called lazy callback %s times and added %s cuts.\n'
-              % (self.model.data.times_called_lazy, self.model.data.times_added_cut))
 
     def solve_fixed_model(self):
         # get the values of the block bid variables
