@@ -45,8 +45,8 @@ class DamSolverGurobi(DamSolver):
 
     def solve(self):
         if self.soln_app is SolutionApproach.Benders:
-            dam_soln = self._solve_benders_decomposition()
-            return dam_soln
+            dam_output = self._solve_benders_decomposition()
+            return dam_output
         elif self.soln_app is SolutionApproach.PrimalDual:
             dam_output = self._solve_primal_dual_problem()
             return dam_output
@@ -55,13 +55,13 @@ class DamSolverGurobi(DamSolver):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
         prob_name = dam_pd.create_model()
         solver = dpd.PrimalDualGurobiSolver(prob_name, self.solver_params)
-        output = solver.solve()
-        return output
+        dam_output = solver.solve()
+        return dam_output
 
     def _solve_benders_decomposition(self):
         dam_benders = db.BendersDecompositionGurobi(self.prob_type, self.dam_data, self.solver_params)
-        solution = dam_benders.solve()
-        return solution
+        dam_output = dam_benders.solve()
+        return dam_output
 
 
 class DamSolverCplex(DamSolver):
@@ -70,23 +70,23 @@ class DamSolverCplex(DamSolver):
 
     def solve(self):
         if self.soln_app is SolutionApproach.Benders:
-            dam_soln = self._solve_benders_decomposition()
-            return dam_soln
+            dam_output = self._solve_benders_decomposition()
+            return dam_output
         elif self.soln_app is SolutionApproach.PrimalDual:
-            dam_soln = self._solve_primal_dual_problem()
-            return dam_soln
+            dam_output = self._solve_primal_dual_problem()
+            return dam_output
 
     def _solve_primal_dual_problem(self):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
         prob_name = dam_pd.create_model()
         solver = dpd.PrimalDualCplexSolver(prob_name, self.solver_params)
-        solution = solver.solve()
-        return solution
+        dam_output = solver.solve()
+        return dam_output
 
     def _solve_benders_decomposition(self):
         dam_benders = db.BendersDecompositionCplex(self.prob_type, self.dam_data, self.solver_params)
-        solution = dam_benders.solve()
-        return solution
+        dam_output = dam_benders.solve()
+        return dam_output
 
 
 class DamSolverScip(DamSolver):
@@ -95,23 +95,23 @@ class DamSolverScip(DamSolver):
 
     def solve(self):
         if self.soln_app is SolutionApproach.Benders:
-            dam_soln = self._solve_benders_decomposition()
-            return dam_soln
+            dam_output = self._solve_benders_decomposition()
+            return dam_output
         elif self.soln_app is SolutionApproach.PrimalDual:
-            dam_soln = self._solve_primal_dual_problem()
-            return dam_soln
+            dam_output = self._solve_primal_dual_problem()
+            return dam_output
 
     def _solve_primal_dual_problem(self):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
         prob_name = dam_pd.create_model()
         solver = dpd.PrimalDualScipSolver(prob_name, self.solver_params)
-        solution = solver.solve()
-        return solution
+        dam_output = solver.solve()
+        return dam_output
 
     def _solve_benders_decomposition(self):
         dam_benders = db.BendersDecompositionScip(self.prob_type, self.dam_data, self.solver_params)
-        solution = dam_benders.solve()
-        return solution
+        dam_output = dam_benders.solve()
+        return dam_output
 
 
 class DamSolution:

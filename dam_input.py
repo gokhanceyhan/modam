@@ -156,12 +156,24 @@ class BidType(Enum):
 class InputStats:
 
     def __init__(self, dam_data):
-        self.number_of_hourlyBids = len(dam_data.dam_bids.bid_id_2_hourly_bid)
-        self.number_of_blockBids = len(dam_data.dam_bids.bid_id_2_block_bid)
-        self.number_of_flexibleBids = len(dam_data.dam_bids.bid_id_2_flexible_bid)
+        self._number_of_hourly_bids = len(dam_data.dam_bids.bid_id_2_hourly_bid)
+        self._number_of_block_bids = len(dam_data.dam_bids.bid_id_2_block_bid)
+        self._number_of_flexible_bids = len(dam_data.dam_bids.bid_id_2_flexible_bid)
+
+    def number_of_hourly_bids(self):
+        """Returns the number of hourly bids"""
+        return self._number_of_hourly_bids
+
+    def number_of_block_bids(self):
+        """Returns the number of block bids"""
+        return self._number_of_block_bids
+
+    def number_of_flexible_bids(self):
+        """Returns the number of flexible bids"""
+        return self._number_of_flexible_bids
 
     def print_stats(self):
         logger.info('Printing input stats...')
-        logger.info('Number of hourly bids: %s', self.number_of_hourlyBids)
-        logger.info('Number of block bids: %s', self.number_of_blockBids)
-        logger.info('Number of flexible bids: %s', self.number_of_flexibleBids)
+        logger.info('Number of hourly bids: %s', self._number_of_hourly_bids)
+        logger.info('Number of block bids: %s', self._number_of_block_bids)
+        logger.info('Number of flexible bids: %s', self._number_of_flexible_bids)

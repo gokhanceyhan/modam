@@ -1,5 +1,6 @@
 .DS_Store
 *.txt
+*.csv
 *.log
 *.pyc
 *.lp
