@@ -1,3 +1,4 @@
+import dam_constants as dc
 
 
 def create_simple_bids_from_hourly_bid(hourly_bid):
@@ -43,12 +44,12 @@ def is_accepted_block_bid_pab(bid, mcp):
     mcp_block = mcp[first:last]
     mcp_avg = sum(mcp_block)/len(mcp_block)
     if bid.is_supply:
-        if bid.price > mcp_avg:
+        if bid.price > mcp_avg + dc.PRICE_COMP_TOL:
             return True
         else:
             return False
     else:
-        if bid.price < mcp_avg:
+        if bid.price < mcp_avg - dc.PRICE_COMP_TOL:
             return True
         else:
             return False
@@ -60,12 +61,12 @@ def is_rejected_block_bid_prb(bid, mcp):
     mcp_block = mcp[first:last]
     mcp_avg = sum(mcp_block)/len(mcp_block)
     if bid.is_supply:
-        if bid.price < mcp_avg:
+        if bid.price < mcp_avg - dc.PRICE_COMP_TOL:
             return True
         else:
             return False
     else:
-        if bid.price > mcp_avg:
+        if bid.price > mcp_avg + dc.PRICE_COMP_TOL:
             return True
         else:
             return False

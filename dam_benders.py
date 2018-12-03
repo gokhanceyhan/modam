@@ -352,8 +352,8 @@ class CallbackGurobi:
     def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
         CallbackGurobi._generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids,
                                                           bid_id_2_bbidvar)
-        if model._prob is ds.ProblemType.NoPab:
-            CallbackGurobi._generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids)
+        # if model._prob is ds.ProblemType.NoPab:
+        #     CallbackGurobi._generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod
     def _generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
@@ -466,7 +466,7 @@ class BendersDecompositionCplex(BendersDecomposition):
         # collect optimization status
         status = solution.get_status()
         best_bound = solution.MIP.get_best_objective()
-        mip_relative_gap = solution.MIP.get_mip_relative_gap()
+        mip_relative_gap = solution.MIP.get_mip_relative_gap() if number_of_solutions >= 1 else -1
         optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
@@ -659,13 +659,15 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids):
         prob_type = self._prob
-        # self._generate_combinatorial_cut_martin(list(accepted_block_bids.values()),
-        #                                         list(rejected_block_bids.values()))
+        self._generate_combinatorial_cut_martin(list(accepted_block_bids.values()),
+                                                list(rejected_block_bids.values()))
         if prob_type is ds.ProblemType.NoPab:
-            self._generate_combinatorial_cut_madani_no_pab(list(rejected_block_bids.values()))
-            self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+            # self._generate_combinatorial_cut_madani_no_pab(list(rejected_block_bids.values()))
+            # self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+            pass
         elif prob_type is ds.ProblemType.NoPrb:
-            self._generate_combinatorial_cut_madani_no_prb(list(accepted_block_bids.values()))
+            # self._generate_combinatorial_cut_madani_no_prb(list(accepted_block_bids.values()))
+            pass
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
         ind = accepted_block_bids + rejected_block_bids
@@ -779,8 +781,8 @@ class BendersDecompositionScip(BendersDecomposition):
         number_of_subproblems_solved = model.data.times_called_lazy
         number_of_user_cuts_added = model.data.times_added_cut
         benders_stats = ds.BendersDecompositionStats(
-            number_of_user_cuts_added=number_of_subproblems_solved,
-            number_of_subproblems_solved=number_of_user_cuts_added)
+            number_of_user_cuts_added=number_of_user_cuts_added,
+            number_of_subproblems_solved=number_of_subproblems_solved)
         optimization_stats = ds.OptimizationStats(
             elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
         # collect optimization status
@@ -869,7 +871,7 @@ class MasterProblemScip(MasterProblem):
     def set_params(self, solver_params):
         self.model.setRealParam('limits/gap', solver_params.rel_gap)
         self.model.setRealParam('limits/time', solver_params.time_limit)
-        # self.model.hideOutput()
+        self.model.hideOutput()
 
     def solve_model(self):
         # solve model
@@ -896,19 +898,18 @@ class MasterProblemScip(MasterProblem):
 
     def solve_fixed_model(self):
         # get the values of the block bid variables
-        bbid_id_2_val = {bid_id: self.model.getVal(bbidvar)
-                         for bid_id, bbidvar in self.model.data.bid_id_2_bbidvar.items()}
+        bbid_id_2_val = {
+            bid_id: self.model.getVal(bbidvar) for bid_id, bbidvar in self.model.data.bid_id_2_bbidvar.items()}
         self.fixed = self.model
         self.fixed.freeTransform()
-
         # convert the problem into fixed MILP
         for bid_id, var in self.bid_id_2_bbidvar.items():
             self.fixed.chgVarType(var, 'C')
             value = bbid_id_2_val[bid_id]
             if abs(value - 0.0) <= self.fixed.getParam('numerics/feastol'):
-                self.fixed.chgVarUb(var, 0.0)
+                self.fixed.chgVarUbGlobal(var, 0.0)
             else:
-                self.fixed.chgVarLb(var, 1.0)
+                self.fixed.chgVarLbGlobal(var, 1.0)
         # following parameters must be set to retrieve dual info in scip
         self.fixed.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         self.fixed.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
@@ -1023,12 +1024,14 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         return cuts_added
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids, prob):
-        # self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
+        self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
         if prob is ds.ProblemType.NoPab:
             # self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
-            self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+            # self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+            pass
         elif prob is ds.ProblemType.NoPrb:
-            self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
+            # self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
+            pass
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
         model = self.model

@@ -59,7 +59,6 @@ class DamRunner(object):
 
     def run(self):
         # create dam input data
-        logger.info(self._input_file_name)
         dam_data = di.DamData()
         dam_data.read_input(self._input_file_name)
         # create input data stats
@@ -72,6 +71,11 @@ class DamRunner(object):
             dam_solver = ds.DamSolverCplex(self._problem_type, self._method, dam_data, params)
         else:
             dam_solver = ds.DamSolverScip(self._problem_type, self._method, dam_data, params)
+        # log run info
+        logger.info('/'.join(
+            [self._input_file_name, self._problem_type.value, self._solver.value, self._method.value,
+             str(self._time_limit), str(self._relative_gap_tolerance)]))
+        # solve
         output = dam_solver.solve()
         solution = output.dam_solution()
         if solution is not None:

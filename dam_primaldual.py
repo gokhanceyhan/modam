@@ -195,7 +195,7 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
     def _get_best_solution(self):
         # fill solution
         dam_soln = ds.DamSolution()
-        dam_soln.total_surplus = self.model.ObjVal
+        dam_soln.total_surplus = -1 * self.model.ObjVal
         varname_2_bbidvar = {x.VarName: x for x in self.model.getVars() if x.VarName.find('y') != -1}
         y = self.model.getAttr('X', varname_2_bbidvar)
         for name, value in y.items():
@@ -251,7 +251,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         solution = self.model.solution
         # fill dam solution object
         dam_soln = ds.DamSolution()
-        dam_soln.total_surplus = solution.get_objective_value()
+        dam_soln.total_surplus = -1 * solution.get_objective_value()
         bbid_varnames = [name for name in self.model.variables.get_names() if name.find('y') != -1]
         varname_2_y = {name: solution.get_values(name) for name in bbid_varnames}
         for name, y in varname_2_y.items():
@@ -275,7 +275,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         # collect optimization status
         status = solution.get_status()
         best_bound = solution.MIP.get_best_objective()
-        mip_relative_gap = solution.MIP.get_mip_relative_gap()
+        mip_relative_gap = solution.MIP.get_mip_relative_gap() if number_of_solutions >= 1 else -1
         optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
@@ -299,13 +299,13 @@ class PrimalDualScipSolver(PrimalDualSolver):
     def _set_params(self):
         self.model.setRealParam('limits/gap', self.solver_params.rel_gap)
         self.model.setRealParam('limits/time', self.solver_params.time_limit)
-        # self.model.hideOutput()
+        self.model.hideOutput()
 
     def _get_best_solution(self):
         model = self.model
         # fill dam solution object
         dam_soln = ds.DamSolution()
-        dam_soln.total_surplus = model.getObjVal()
+        dam_soln.total_surplus = -1 * model.getObjVal()
         varname_2_bbidvar = {x.name: x for x in model.getVars() if x.name.find('y') != -1}
         varname_2_y = {name: model.getVal(var) for name, var in varname_2_bbidvar.items()}
         for name, value in varname_2_y.items():

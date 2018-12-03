@@ -38,10 +38,10 @@ def batch_run(input_folder_name):
     input_file_names = [
         '/'.join([path, file]) for file in os.listdir(input_folder_name) if os.path.splitext(file)[1] == '.csv']
     problem_types = [ds.ProblemType.NoPab]
-    solvers = [ds.Solver.Gurobi]
+    solvers = [ds.Solver.Scip]
     methods = [ds.SolutionApproach.Benders]
-    time_limits = [10]
-    relative_gap_tolerances = [1e-4]
+    time_limits = [60]
+    relative_gap_tolerances = [1e-6]
     batch_runner = dr.BatchRunner(
         input_file_names, problem_types, solvers, methods, time_limits, relative_gap_tolerances)
     batch_runner.run()
@@ -60,12 +60,10 @@ def write_runners_to_file(runners):
             'number of user cuts']
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
-        count = 0
         for runner in runners:
-            count += 1
             writer.writerow(
                 {
-                    'problem file': '_'.join(['instance', str(count)]),
+                    'problem file': runner.input_file_name(),
                     'problem type': runner.problem_type().value,
                     'solver': runner.solver().value,
                     'method': runner.method().value,
