@@ -871,7 +871,7 @@ class MasterProblemScip(MasterProblem):
     def set_params(self, solver_params):
         self.model.setRealParam('limits/gap', solver_params.rel_gap)
         self.model.setRealParam('limits/time', solver_params.time_limit)
-        self.model.hideOutput()
+        # self.model.hideOutput()
 
     def solve_model(self):
         # solve model
@@ -899,7 +899,7 @@ class MasterProblemScip(MasterProblem):
     def solve_fixed_model(self):
         # get the values of the block bid variables
         bbid_id_2_val = {
-            bid_id: self.model.getVal(bbidvar) for bid_id, bbidvar in self.model.data.bid_id_2_bbidvar.items()}
+            bid_id: self.model.getVal(bbidvar) for bid_id, bbidvar in self.bid_id_2_bbidvar.items()}
         self.fixed = self.model
         self.fixed.freeTransform()
         # convert the problem into fixed MILP
@@ -907,9 +907,9 @@ class MasterProblemScip(MasterProblem):
             self.fixed.chgVarType(var, 'C')
             value = bbid_id_2_val[bid_id]
             if abs(value - 0.0) <= self.fixed.getParam('numerics/feastol'):
-                self.fixed.chgVarUbGlobal(var, 0.0)
+                self.fixed.chgVarUb(var, 0.0)
             else:
-                self.fixed.chgVarLbGlobal(var, 1.0)
+                self.fixed.chgVarLb(var, 1.0)
         # following parameters must be set to retrieve dual info in scip
         self.fixed.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         self.fixed.setHeuristics(scip.SCIP_PARAMSETTING.OFF)

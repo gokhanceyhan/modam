@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def single_run(filename, problem, solver, method):
     runner = dr.DamRunner(
-        filename, problem_type=problem, solver=solver, method=method, time_limit=10, relative_gap_tolerance=1e-4)
+        filename, problem_type=problem, solver=solver, method=method, time_limit=60, relative_gap_tolerance=1e-6)
     runner.run()
     if runner.output().optimization_stats().number_of_solutions() == 0:
         print('Failed to find a solution')
@@ -97,7 +97,7 @@ def usage():
     print('run mode: {single, batch}')
     print('problem (required for run mode "single"): {NoPab, NoPrb}')
     print('solver (required for run mode "single"): {gurobi, cplex, scip}')
-    print('method (required for run mode "single"): {primal-dual, benders}')
+    print('method (required for run mode "single"): {primal-dual, benders, branch-bound(only scip)}')
 
 
 if __name__ == "__main__":
@@ -146,6 +146,12 @@ if __name__ == "__main__":
         _method = ds.SolutionApproach.PrimalDual
     elif sys.argv[5].lower() == 'benders':
         _method = ds.SolutionApproach.Benders
+    elif sys.argv[5].lower() == 'branch-bound':
+        _method = ds.SolutionApproach.BranchAndBound
+        if _solver is not ds.Solver.Scip:
+            print('You can only use Scip')
+            usage()
+            sys.exit(-1)
     else:
         usage()
         sys.exit(-1)

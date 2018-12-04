@@ -2,6 +2,7 @@ from enum import Enum
 from abc import abstractmethod
 import dam_benders as db
 import dam_primaldual as dpd
+import dam_branching as dbr
 import dam_utils as du
 
 
@@ -13,6 +14,7 @@ class ProblemType(Enum):
 class SolutionApproach(Enum):
     PrimalDual = 'Primal-Dual'
     Benders = 'Benders Decomposition'
+    BranchAndBound = 'Branch and Bound'
 
 
 class Solver(Enum):
@@ -100,6 +102,9 @@ class DamSolverScip(DamSolver):
         elif self.soln_app is SolutionApproach.PrimalDual:
             dam_output = self._solve_primal_dual_problem()
             return dam_output
+        elif self.soln_app is SolutionApproach.BranchAndBound:
+            dam_output = self._solve_branch_and_bound()
+            return dam_output
 
     def _solve_primal_dual_problem(self):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp')
@@ -111,6 +116,11 @@ class DamSolverScip(DamSolver):
     def _solve_benders_decomposition(self):
         dam_benders = db.BendersDecompositionScip(self.prob_type, self.dam_data, self.solver_params)
         dam_output = dam_benders.solve()
+        return dam_output
+
+    def _solve_branch_and_bound(self):
+        dam_branch_and_bound = dbr.BranchAndBoundScip(self.prob_type, self.dam_data, self.solver_params)
+        dam_output = dam_branch_and_bound.solve()
         return dam_output
 
 
