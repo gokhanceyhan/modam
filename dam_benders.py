@@ -265,7 +265,7 @@ class MasterProblemGurobi(MasterProblem):
         self.model.optimize()
 
     def solve_model_with_callback(self, callback):
-        self.model.Params.Heuristics = 0
+        # self.model.Params.Heuristics = 0
         self.model.Params.LazyConstraints = 1
         self.model.optimize(callback)
 
@@ -275,7 +275,7 @@ class MasterProblemGurobi(MasterProblem):
         self.fixed.optimize()
 
     def solve_relaxed_model(self):
-        self.relaxed = self.model.relax()
+        self.relaxed = self.model.copy().relax()
         self.relaxed.optimize()
 
 
@@ -764,11 +764,22 @@ class BendersDecompositionScip(BendersDecomposition):
                 dam_soln.rejected_block_bids.append(bid_id)
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
-        market_clearing_prices = []
-        for con in self.master_problem.period_2_balance_con.values():
-            mcp = model.getDualsolLinear(con)
-            market_clearing_prices.append(mcp)
-        dam_soln.market_clearing_prices = market_clearing_prices
+        # get market clearing prices by creating a master_problem and solving its relaxation with Gurobi
+        # since there are problems with getting dual variable values with scip LP solver
+        grb_master_problem = MasterProblemGurobi(self.dam_data)
+        grb_master_problem.create_model()
+        grb_master_problem.set_params(self.solver_params)
+        for bid_id in dam_soln.rejected_block_bids:
+            var = grb_master_problem.bid_id_2_bbidvar.get(bid_id)
+            var.ub = 0.0
+        for bid_id in dam_soln.accepted_block_bids:
+            var = grb_master_problem.bid_id_2_bbidvar.get(bid_id)
+            var.lb = 1.0
+        # TODO: solving relaxed problem does not work for some reason
+        grb_master_problem.solve_model()
+        grb_master_problem.solve_fixed_model()
+        dam_soln.market_clearing_prices = grb_master_problem.fixed.getAttr(
+            'Pi', grb_master_problem.period_2_balance_con.values())
         return dam_soln
 
     def _get_solver_output(self):
@@ -796,6 +807,9 @@ class BendersDecompositionScip(BendersDecomposition):
             best_solution = self._get_best_solution()
         else:
             best_solution = None
+        # clear models
+        self.master_problem.model.freeProb()
+        self.sub_problem.model.freeProb()
         return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
@@ -904,13 +918,12 @@ class MasterProblemScip(MasterProblem):
         self.fixed.freeTransform()
         # convert the problem into fixed MILP
         for bid_id, var in self.bid_id_2_bbidvar.items():
-            self.fixed.chgVarType(var, 'C')
             value = bbid_id_2_val[bid_id]
             if abs(value - 0.0) <= self.fixed.getParam('numerics/feastol'):
                 self.fixed.chgVarUb(var, 0.0)
             else:
                 self.fixed.chgVarLb(var, 1.0)
-        # following parameters must be set to retrieve dual info in scip
+            self.fixed.chgVarType(var, 'C')
         self.fixed.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         self.fixed.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
         self.fixed.disablePropagation()
@@ -1088,6 +1101,7 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
             model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coefficients)) >= rhs)
 
     def _find_market_clearing_prices(self, accepted_block_bids):
+        # TODO: modify to be able to handle no-prb case as well
         # solve sub-problem again to obtain dual values
         # restrict accepted block bids as well
         model = self.model

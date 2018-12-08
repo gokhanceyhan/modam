@@ -50,7 +50,7 @@ class BranchAndBoundScip(object):
         master_problem.set_params(self.solver_params)
         model = master_problem.model
         # additional settings
-        model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
+        # model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
         model.setBoolParam("misc/allowdualreds", 0)
         # set branching data
@@ -59,8 +59,8 @@ class BranchAndBoundScip(object):
         model.data = branching_data
         # set branch rule
         branch_rule = BranchAndBoundScip.MultiNodeBranching(model)
-        model.includeBranchrule(
-            branch_rule, "test_branch", "test branching", priority=1000000, maxdepth=-1, maxbounddist=1)
+        # model.includeBranchrule(
+        #     branch_rule, "test_branch", "test branching", priority=1000000, maxdepth=-1, maxbounddist=1)
         # solve
         master_problem.solve_model()
         return self._get_solver_output()
@@ -80,11 +80,22 @@ class BranchAndBoundScip(object):
                 dam_soln.rejected_block_bids.append(bid_id)
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
-        market_clearing_prices = []
-        for con in master_problem.period_2_balance_con.values():
-            mcp = model.getDualsolLinear(con)
-            market_clearing_prices.append(mcp)
-        dam_soln.market_clearing_prices = market_clearing_prices
+        # get market clearing prices by creating a master_problem and solving its relaxation with Gurobi
+        # since there are problems with getting dual variable values with scip LP solver
+        grb_master_problem = db.MasterProblemGurobi(self.dam_data)
+        grb_master_problem.create_model()
+        grb_master_problem.set_params(self.solver_params)
+        for bid_id in dam_soln.rejected_block_bids:
+            var = grb_master_problem.bid_id_2_bbidvar.get(bid_id)
+            var.ub = 0.0
+        for bid_id in dam_soln.accepted_block_bids:
+            var = grb_master_problem.bid_id_2_bbidvar.get(bid_id)
+            var.lb = 1.0
+        # TODO: solving relaxed problem does not work for some reason
+        grb_master_problem.solve_model()
+        grb_master_problem.solve_fixed_model()
+        dam_soln.market_clearing_prices = grb_master_problem.fixed.getAttr(
+            'Pi', grb_master_problem.period_2_balance_con.values())
         return dam_soln
 
     def _get_solver_output(self):

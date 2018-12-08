@@ -15,7 +15,7 @@ class DamRunner(object):
 
     def __init__(
             self, input_file_name, problem_type=ds.ProblemType.NoPab, solver=ds.Solver.Gurobi,
-            method=ds.SolutionApproach.PrimalDual, time_limit=60, relative_gap_tolerance=1e-6):
+            method=ds.SolutionApproach.PrimalDual, time_limit=60, relative_gap_tolerance=1e-4):
         self._input_file_name = input_file_name
         self._problem_type = problem_type
         self._solver = solver

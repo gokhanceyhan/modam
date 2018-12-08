@@ -38,7 +38,7 @@ def batch_run(input_folder_name):
     input_file_names = [
         '/'.join([path, file]) for file in os.listdir(input_folder_name) if os.path.splitext(file)[1] == '.csv']
     problem_types = [ds.ProblemType.NoPab]
-    solvers = [ds.Solver.Scip]
+    solvers = [ds.Solver.Gurobi]
     methods = [ds.SolutionApproach.Benders]
     time_limits = [60]
     relative_gap_tolerances = [1e-6]
@@ -146,7 +146,7 @@ if __name__ == "__main__":
         _method = ds.SolutionApproach.PrimalDual
     elif sys.argv[5].lower() == 'benders':
         _method = ds.SolutionApproach.Benders
-    elif sys.argv[5].lower() == 'branch-bound':
+    elif sys.argv[5].lower() == 'branch-and-bound':
         _method = ds.SolutionApproach.BranchAndBound
         if _solver is not ds.Solver.Scip:
             print('You can only use Scip')
