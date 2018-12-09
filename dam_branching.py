@@ -50,7 +50,7 @@ class BranchAndBoundScip(object):
         master_problem.set_params(self.solver_params)
         model = master_problem.model
         # additional settings
-        # model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
+        model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
         model.setBoolParam("misc/allowdualreds", 0)
         # set branching data
@@ -59,8 +59,8 @@ class BranchAndBoundScip(object):
         model.data = branching_data
         # set branch rule
         branch_rule = BranchAndBoundScip.MultiNodeBranching(model)
-        # model.includeBranchrule(
-        #     branch_rule, "test_branch", "test branching", priority=1000000, maxdepth=-1, maxbounddist=1)
+        model.includeBranchrule(
+            branch_rule, "test_branch", "test branching", priority=1000000, maxdepth=-1, maxbounddist=1)
         # solve
         master_problem.solve_model()
         return self._get_solver_output()
