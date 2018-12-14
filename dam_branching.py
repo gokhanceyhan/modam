@@ -53,6 +53,13 @@ class BranchAndBoundScip(object):
         model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
         model.setBoolParam("misc/allowdualreds", 0)
+        # we need to turn off all cuts
+        model.setIntParam("separating/maxrounds", 0)
+        model.setIntParam("separating/maxroundsroot", 0)
+        model.setIntParam("separating/maxcuts", 0)
+        model.setIntParam("separating/maxcutsroot", 0)
+        model.setIntParam("propagating/maxrounds", 0)
+        model.setIntParam("propagating/maxroundsroot", 0)
         # set branching data
         branching_data = self.BranchingData(
             dam_data=self.dam_data, bid_id_2_bbidvar=master_problem.bid_id_2_bbidvar, prob_type=self.prob_type)

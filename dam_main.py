@@ -38,8 +38,8 @@ def batch_run(input_folder_name):
     input_file_names = [
         '/'.join([path, file]) for file in os.listdir(input_folder_name) if os.path.splitext(file)[1] == '.csv']
     problem_types = [ds.ProblemType.NoPab]
-    solvers = [ds.Solver.Cplex]
-    methods = [ds.SolutionApproach.Benders]
+    solvers = [ds.Solver.Scip]
+    methods = [ds.SolutionApproach.BranchAndBound]
     time_limits = [60]
     relative_gap_tolerances = [1e-6]
     batch_runner = dr.BatchRunner(
@@ -97,7 +97,7 @@ def usage():
     print('run mode: {single, batch}')
     print('problem (required for run mode "single"): {NoPab, NoPrb}')
     print('solver (required for run mode "single"): {gurobi, cplex, scip}')
-    print('method (required for run mode "single"): {primal-dual, benders, branch-bound(only scip)}')
+    print('method (required for run mode "single"): {primal-dual, benders, branch-and-bound(only scip)}')
 
 
 if __name__ == "__main__":
