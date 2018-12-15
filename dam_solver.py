@@ -9,6 +9,7 @@ import dam_utils as du
 class ProblemType(Enum):
     NoPab = 'NoPAB'
     NoPrb = 'NoPRB'
+    Unrestricted = 'Unrestricted'
 
 
 class SolutionApproach(Enum):
@@ -153,6 +154,8 @@ class DamSolution:
             self._verify_no_pab(dam_bids)
         elif problem_type == ProblemType.NoPrb:
             self._verify_no_prb(dam_bids)
+        elif problem_type == ProblemType.Unrestricted:
+            self.is_valid = True
 
 
 class BendersDecompositionStats(object):

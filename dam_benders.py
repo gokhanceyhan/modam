@@ -7,6 +7,7 @@ import pyscipopt as scip
 import dam_constants as dc
 import dam_solver as ds
 import dam_utils as du
+from dam_exceptions import UnsupportedProblemException
 
 
 class BendersDecomposition(object):
@@ -126,6 +127,13 @@ class BendersDecompositionGurobi(BendersDecomposition):
     def solve(self):
         if self.prob_type is ds.ProblemType.NoPab:
             return self._solve_no_pab()
+        elif self.prob_type is ds.ProblemType.NoPrb:
+            return self._solve_no_prb()
+        elif self.prob_type is ds.ProblemType.Unrestricted:
+            return self._solve_unrestricted_problem()
+        else:
+            raise UnsupportedProblemException(
+                "Problem type %s is not supported in method Benders Decomposition of solver Gurobi" % self.prob_type)
 
     def _solve_no_pab(self):
         # create master problem
@@ -154,6 +162,18 @@ class BendersDecompositionGurobi(BendersDecomposition):
 
     def _solve_no_prb(self):
         pass
+
+    def _solve_unrestricted_problem(self):
+        # create master problem
+        self.master_problem = MasterProblemGurobi(self.dam_data)
+        master_prob = self.master_problem
+        master_prob.create_model()
+        master_prob.write_model()
+        master_prob.set_params(self.solver_params)
+        master_prob.model._num_of_subproblems = 0
+        master_prob.model._num_of_user_cuts = 0
+        master_prob.solve_model()
+        return self._get_solver_output()
 
     def _get_best_solution(self):
         # fill solution
@@ -410,6 +430,13 @@ class BendersDecompositionCplex(BendersDecomposition):
     def solve(self):
         if self.prob_type is ds.ProblemType.NoPab:
             return self._solve_no_pab()
+        elif self.prob_type is ds.ProblemType.NoPrb:
+            return self._solve_no_prb()
+        elif self.prob_type is ds.ProblemType.Unrestricted:
+            return self._solve_unrestricted_problem()
+        else:
+            raise UnsupportedProblemException(
+                "Problem type %s is not supported in method Benders Decomposition of solver Cplex" % self.prob_type)
 
     def _solve_no_pab(self):
         # create master problem
@@ -432,6 +459,20 @@ class BendersDecompositionCplex(BendersDecomposition):
 
     def _solve_no_prb(self):
         pass
+
+    def _solve_unrestricted_problem(self):
+        # create master problem
+        self.master_problem = MasterProblemCplex(self.dam_data)
+        master_prob = self.master_problem
+        master_prob.create_model()
+        master_prob.write_model()
+        master_prob.set_params(self.solver_params)
+        # run benders decomposition
+        start_time = master_prob.model.get_time()
+        master_prob.solve_model()
+        end_time = master_prob.model.get_time()
+        elapsed_time = end_time - start_time
+        return self._get_solver_output(elapsed_time)
 
     def _get_best_solution(self):
         mp = self.master_problem
@@ -457,8 +498,10 @@ class BendersDecompositionCplex(BendersDecomposition):
         elapsed_time = elapsed_time
         number_of_solutions = solution.pool.get_num()
         number_of_nodes = solution.progress.get_num_nodes_processed()
-        number_of_subproblems_solved = master_problem.callback_instance._times_called
-        number_of_user_cuts_added = master_problem.callback_instance._cuts_added
+        number_of_subproblems_solved = master_problem.callback_instance._times_called if \
+            master_problem.callback_instance else 0
+        number_of_user_cuts_added = master_problem.callback_instance._cuts_added if \
+            master_problem.callback_instance else 0
         benders_stats = ds.BendersDecompositionStats(
             number_of_user_cuts_added=number_of_user_cuts_added,
             number_of_subproblems_solved=number_of_subproblems_solved)
@@ -727,6 +770,13 @@ class BendersDecompositionScip(BendersDecomposition):
     def solve(self):
         if self.prob_type is ds.ProblemType.NoPab:
             return self._solve_no_pab()
+        elif self.prob_type is ds.ProblemType.NoPrb:
+            return self._solve_no_prb()
+        elif self.prob_type is ds.ProblemType.Unrestricted:
+            return self._solve_unrestricted_problem()
+        else:
+            raise UnsupportedProblemException(
+                "Problem type %s is not supported in method Benders Decomposition of solver Scip" % self.prob_type)
 
     def _solve_no_pab(self):
         # create master problem
@@ -753,12 +803,22 @@ class BendersDecompositionScip(BendersDecomposition):
     def _solve_no_prb(self):
         pass
 
+    def _solve_unrestricted_problem(self):
+        # create master problem
+        self.master_problem = MasterProblemScip(self.dam_data)
+        master_prob = self.master_problem
+        master_prob.create_model()
+        master_prob.write_model()
+        master_prob.set_params(self.solver_params)
+        master_prob.solve_model()
+        return self._get_solver_output()
+
     def _get_best_solution(self):
         model = self.master_problem.fixed
         # fill dam solution object
         dam_soln = ds.DamSolution()
         dam_soln.total_surplus = model.getObjVal()
-        for bid_id, var in model.data.bid_id_2_bbidvar.items():
+        for bid_id, var in self.master_problem.bid_id_2_bbidvar.items():
             value = model.getVal(var)
             if abs(value - 0.0) <= model.getParam('numerics/feastol'):
                 dam_soln.rejected_block_bids.append(bid_id)
@@ -789,8 +849,8 @@ class BendersDecompositionScip(BendersDecomposition):
         elapsed_time = model.getSolvingTime()
         number_of_solutions = len(model.getSols())
         number_of_nodes = model.getNNodes()
-        number_of_subproblems_solved = model.data.times_called_lazy
-        number_of_user_cuts_added = model.data.times_added_cut
+        number_of_subproblems_solved = model.data.times_called_lazy if model.data else 0
+        number_of_user_cuts_added = model.data.times_added_cut if model.data else 0
         benders_stats = ds.BendersDecompositionStats(
             number_of_user_cuts_added=number_of_user_cuts_added,
             number_of_subproblems_solved=number_of_subproblems_solved)
@@ -809,7 +869,8 @@ class BendersDecompositionScip(BendersDecomposition):
             best_solution = None
         # clear models
         self.master_problem.model.freeProb()
-        self.sub_problem.model.freeProb()
+        if self.sub_problem:
+            self.sub_problem.model.freeProb()
         return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 

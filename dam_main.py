@@ -38,8 +38,8 @@ def batch_run(input_folder_name):
     input_file_names = [
         '/'.join([path, file]) for file in os.listdir(input_folder_name) if os.path.splitext(file)[1] == '.csv']
     problem_types = [ds.ProblemType.NoPab]
-    solvers = [ds.Solver.Scip]
-    methods = [ds.SolutionApproach.BranchAndBound]
+    solvers = [ds.Solver.Gurobi, ds.Solver.Cplex, ds.Solver.Scip]
+    methods = [ds.SolutionApproach.Benders]
     time_limits = [60]
     relative_gap_tolerances = [1e-6]
     batch_runner = dr.BatchRunner(
@@ -95,7 +95,7 @@ def usage():
     print('usage:   dam_main.py path run_mode problem solver method')
     print('path: relative path to the problem file(s)')
     print('run mode: {single, batch}')
-    print('problem (required for run mode "single"): {NoPab, NoPrb}')
+    print('problem (required for run mode "single"): {Unrestricted, NoPab, NoPrb}')
     print('solver (required for run mode "single"): {gurobi, cplex, scip}')
     print('method (required for run mode "single"): {primal-dual, benders, branch-and-bound(only scip)}')
 
@@ -122,6 +122,8 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     _prob = None
+    if sys.argv[3].lower() == 'unrestricted':
+        _prob = ds.ProblemType.Unrestricted
     if sys.argv[3].lower() == 'nopab':
         _prob = ds.ProblemType.NoPab
     elif sys.argv[3].lower() == 'noprb':

@@ -31,6 +31,21 @@ class BranchAndBoundScip(object):
                 child_priority = model.calcNodeselPriority(var, scip.SCIP_BRANCHDIR.DOWNWARDS, 0.0)
                 node = model.createChild(child_priority, child_estimate)
                 model.chgVarUbNode(node, var, 0.0)
+            # create another child in which at least one of the accepted block bids must be zero.
+            # accepted_block_bids = []
+            # rejected_block_bids = []
+            # for bbid_id, bbidvar in model.data.bid_id_2_bbidvar.items():
+            #     value = model.getVal(bbidvar)
+            #     if abs(value - 0.0) <= model.getParam('numerics/feastol'):
+            #         rejected_block_bids.append(bbid_id)
+            #     else:
+            #         accepted_block_bids.append(bbid_id)
+            # for bid_id in accepted_block_bids:
+            #     var = model.data.bid_id_2_bbidvar[bid_id]
+            #     child_estimate = model.calcChildEstimate(var, 0.0)
+            #     child_priority = model.calcNodeselPriority(var, scip.SCIP_BRANCHDIR.DOWNWARDS, 0.0)
+            #     node = model.createChild(child_priority, child_estimate)
+            #     model.chgVarUbNode(node, var, 0.0)
             return {"result": scip.SCIP_RESULT.BRANCHED}
 
     def __init__(self, prob_type, dam_data, solver_params):
