@@ -614,6 +614,7 @@ class MasterProblemCplex(MasterProblem):
         callback_instance._bid_id_2_bbid_var_index = bid_id_2_bbid_var_index
         self.callback_instance = callback_instance
         # turnoff some parameters due to use of callbacks
+        # CPLEX automatically makes the below configuration except mip search strategy
         self.model.parameters.threads.set(1)
         self.model.parameters.preprocessing.presolve.set(self.model.parameters.preprocessing.presolve.values.off)
         self.model.parameters.mip.strategy.search.set(self.model.parameters.mip.strategy.search.values.traditional)
