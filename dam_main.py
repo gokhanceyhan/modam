@@ -37,8 +37,8 @@ def batch_run(input_folder_name):
     path = os.path.relpath(input_folder_name)
     input_file_names = [
         '/'.join([path, file]) for file in os.listdir(input_folder_name) if os.path.splitext(file)[1] == '.csv']
-    problem_types = [ds.ProblemType.NoPab]
-    solvers = [ds.Solver.Gurobi, ds.Solver.Cplex, ds.Solver.Scip]
+    problem_types = [ds.ProblemType.NoPrb]
+    solvers = [ds.Solver.Cplex]
     methods = [ds.SolutionApproach.Benders]
     time_limits = [60]
     relative_gap_tolerances = [1e-6]
@@ -92,7 +92,7 @@ def write_runners_to_file(runners):
 
 
 def usage():
-    print('usage:   dam_main.py path run_mode problem solver method')
+    print('usage: dam_main.py path run_mode problem solver method')
     print('path: relative path to the problem file(s)')
     print('run mode: {single, batch}')
     print('problem (required for run mode "single"): {Unrestricted, NoPab, NoPrb}')
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     _prob = None
     if sys.argv[3].lower() == 'unrestricted':
         _prob = ds.ProblemType.Unrestricted
-    if sys.argv[3].lower() == 'nopab':
+    elif sys.argv[3].lower() == 'nopab':
         _prob = ds.ProblemType.NoPab
     elif sys.argv[3].lower() == 'noprb':
         _prob = ds.ProblemType.NoPrb

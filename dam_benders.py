@@ -161,7 +161,29 @@ class BendersDecompositionGurobi(BendersDecomposition):
         return self._get_solver_output()
 
     def _solve_no_prb(self):
-        pass
+        # create master problem
+        self.master_problem = MasterProblemGurobi(self.dam_data)
+        master_prob = self.master_problem
+        master_prob.create_model()
+        master_prob.write_model()
+        master_prob.set_params(self.solver_params)
+
+        # create sub problem
+        self.sub_problem = SubProblemGurobi(master_prob)
+        sub_prob = self.sub_problem
+
+        # pass data into callback
+        master_prob.model._dam_data = self.dam_data
+        master_prob.model._bid_id_2_bbidvar = master_prob.bid_id_2_bbidvar
+        master_prob.model._sp = sub_prob
+        master_prob.model._prob = ds.ProblemType.NoPrb
+        master_prob.model._num_of_subproblems = 0
+        master_prob.model._num_of_user_cuts = 0
+
+        # run benders decomposition
+        callback = CallbackGurobi()
+        master_prob.solve_model_with_callback(callback.dam_callback)
+        return self._get_solver_output()
 
     def _solve_unrestricted_problem(self):
         # create master problem
@@ -370,11 +392,9 @@ class CallbackGurobi:
 
     @staticmethod
     def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
-        CallbackGurobi._generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids,
-                                                          bid_id_2_bbidvar)
-        if model._prob is ds.ProblemType.NoPab:
-            CallbackGurobi._generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids)
-        pass
+        # CallbackGurobi._generate_combinatorial_cut_martin(
+        #     model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar)
+        CallbackGurobi._generate_gcuts(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod
     def _generate_combinatorial_cut_martin(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
@@ -391,27 +411,38 @@ class CallbackGurobi:
         model._num_of_user_cuts += 1
 
     @staticmethod
-    def _generate_gcuts_for_no_pab(model, accepted_block_bids, rejected_block_bids):
+    def _generate_gcuts(model, accepted_block_bids, rejected_block_bids):
         bid_id_2_block_bid = model._dam_data.dam_bids.bid_id_2_block_bid
         bid_id_2_bbidvar = model._bid_id_2_bbidvar
-        market_clearing_prices = CallbackGurobi._find_market_clearing_prices(model, accepted_block_bids)
-
-        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid)
+        market_clearing_prices = CallbackGurobi._find_market_clearing_prices(
+            model, accepted_block_bids, rejected_block_bids)
+        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
+            if model._prob is ds.ProblemType.NoPab else []
+        prbs = du.find_prbs(market_clearing_prices, rejected_block_bids, bid_id_2_block_bid) \
+            if model._prob is ds.ProblemType.NoPrb else []
         for pab in pabs:
-            variables, coefficients, rhs = du.create_gcut_for_pab(pab, accepted_block_bids, rejected_block_bids,
-                                                                  bid_id_2_block_bid, bid_id_2_bbidvar)
+            variables, coefficients, rhs = du.create_gcut_for_pab(
+                pab, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
+            expr = grb.LinExpr(0.0)
+            expr.addTerms(coefficients, variables)
+            model.cbLazy(expr >= rhs)
+            model._num_of_user_cuts += 1
+        for prb in prbs:
+            variables, coefficients, rhs = du.create_gcut_for_prb(
+                prb, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
             expr = grb.LinExpr(0.0)
             expr.addTerms(coefficients, variables)
             model.cbLazy(expr >= rhs)
             model._num_of_user_cuts += 1
 
     @staticmethod
-    def _find_market_clearing_prices(model, accepted_block_bids):
+    def _find_market_clearing_prices(model, accepted_block_bids, rejected_block_bids):
         # solve sub-problem again to obtain dual values
-        # restrict accepted block bids as well
+        # restrict accepted and rejected block bids
         sp = model._sp
         dam_data = model._dam_data
         sp.restrict_accepted_block_bids(accepted_block_bids)
+        sp.restrict_rejected_block_bids(rejected_block_bids)
         sp.solve_model()
         # TODO: replace 'balance_' with a defined constant
         balance_constraints = [sp.model.getConstrByName('balance_' + str(period))
@@ -452,13 +483,29 @@ class BendersDecompositionCplex(BendersDecomposition):
 
         # run benders decomposition
         start_time = master_prob.model.get_time()
-        master_prob.solve_model_with_callback(sub_prob)
+        master_prob.solve_model_with_callback(sub_prob, ds.ProblemType.NoPab)
         end_time = master_prob.model.get_time()
         elapsed_time = end_time - start_time
         return self._get_solver_output(elapsed_time)
 
     def _solve_no_prb(self):
-        pass
+        # create master problem
+        self.master_problem = MasterProblemCplex(self.dam_data)
+        master_prob = self.master_problem
+        master_prob.create_model()
+        master_prob.write_model()
+        master_prob.set_params(self.solver_params)
+
+        # create sub problem
+        self.sub_problem = SubProblemCplex(master_prob)
+        sub_prob = self.sub_problem
+
+        # run benders decomposition
+        start_time = master_prob.model.get_time()
+        master_prob.solve_model_with_callback(sub_prob, ds.ProblemType.NoPrb)
+        end_time = master_prob.model.get_time()
+        elapsed_time = end_time - start_time
+        return self._get_solver_output(elapsed_time)
 
     def _solve_unrestricted_problem(self):
         # create master problem
@@ -598,13 +645,13 @@ class MasterProblemCplex(MasterProblem):
     def solve_model(self):
         self.model.solve()
 
-    def solve_model_with_callback(self, sub_prob):
+    def solve_model_with_callback(self, sub_prob, problem_type):
         # register callback
         callback_instance = self.model.register_callback(LazyConstraintCallbackCplex)
         # create callback attributes
         callback_instance._dam_data = self.dam_data
         callback_instance._sp = sub_prob
-        callback_instance._prob = ds.ProblemType.NoPab
+        callback_instance._prob = problem_type
         callback_instance._times_called = 0
         callback_instance._cuts_added = 0
         bid_id_2_bbid_var_index = {}
@@ -704,14 +751,15 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids):
         prob_type = self._prob
-        self._generate_combinatorial_cut_martin(list(accepted_block_bids.values()),
-                                                list(rejected_block_bids.values()))
+        # self._generate_combinatorial_cut_martin(list(accepted_block_bids.values()),
+        #                                         list(rejected_block_bids.values()))
         if prob_type is ds.ProblemType.NoPab:
-            self._generate_combinatorial_cut_madani_no_pab(list(accepted_block_bids.values()))
-            self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+            # self._generate_combinatorial_cut_madani_no_pab(list(accepted_block_bids.values()))
+            pass
         elif prob_type is ds.ProblemType.NoPrb:
             # self._generate_combinatorial_cut_madani_no_prb(list(rejected_block_bids.values()))
             pass
+        self._generate_gcuts(prob_type, accepted_block_bids, rejected_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
         ind = accepted_block_bids + rejected_block_bids
@@ -733,25 +781,35 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         self.add_local(constraint=cpx.SparsePair(ind, coeff), sense='G', rhs=0)
         self._cuts_added += 1
 
-    def _generate_gcuts_for_no_pab(self, accepted_block_bids, rejected_block_bids):
+    def _generate_gcuts(self, problem_type, accepted_block_bids, rejected_block_bids):
         bid_id_2_block_bid = self._dam_data.dam_bids.bid_id_2_block_bid
         bid_id_2_bbid_var_index = self._bid_id_2_bbid_var_index
-        market_clearing_prices = self._find_market_clearing_prices(list(accepted_block_bids.values()))
-
-        pabs = du.find_pabs(market_clearing_prices, list(accepted_block_bids.keys()), bid_id_2_block_bid)
+        market_clearing_prices = self._find_market_clearing_prices(
+            list(accepted_block_bids.values()), list(rejected_block_bids.values()))
+        pabs = du.find_pabs(market_clearing_prices, list(accepted_block_bids.keys()), bid_id_2_block_bid) \
+            if problem_type is ds.ProblemType.NoPab else []
+        prbs = du.find_prbs(market_clearing_prices, list(rejected_block_bids.keys()), bid_id_2_block_bid) \
+            if problem_type is ds.ProblemType.NoPrb else []
         for pab in pabs:
-            variables, coefficients, rhs = du.create_gcut_for_pab(pab, list(accepted_block_bids.keys()),
-                                                                  list(rejected_block_bids.keys()), bid_id_2_block_bid,
-                                                                  bid_id_2_bbid_var_index)
+            variables, coefficients, rhs = du.create_gcut_for_pab(
+                pab, list(accepted_block_bids.keys()), list(rejected_block_bids.keys()), bid_id_2_block_bid,
+                bid_id_2_bbid_var_index)
+            self.add(constraint=cpx.SparsePair(variables, coefficients), sense='G', rhs=rhs)
+            self._cuts_added += 1
+        for prb in prbs:
+            variables, coefficients, rhs = du.create_gcut_for_prb(
+                prb, list(accepted_block_bids.keys()), list(rejected_block_bids.keys()), bid_id_2_block_bid,
+                bid_id_2_bbid_var_index)
             self.add(constraint=cpx.SparsePair(variables, coefficients), sense='G', rhs=rhs)
             self._cuts_added += 1
 
-    def _find_market_clearing_prices(self, accepted_block_bids):
+    def _find_market_clearing_prices(self, accepted_block_bids, rejected_block_bids):
         # solve sub-problem again to obtain dual values
-        # restrict accepted block bids as well
+        # restrict accepted and rejected block bids
         sp = self._sp
         dam_data = self._dam_data
         sp.restrict_accepted_block_bids(accepted_block_bids)
+        sp.restrict_rejected_block_bids(rejected_block_bids)
         sp.solve_model()
         solution = sp.model.solution
         market_clearing_prices = solution.get_dual_values(['balance_' + str(period)
@@ -802,7 +860,26 @@ class BendersDecompositionScip(BendersDecomposition):
         return self._get_solver_output()
 
     def _solve_no_prb(self):
-        pass
+        # create master problem
+        self.master_problem = MasterProblemScip(self.dam_data)
+        master_prob = self.master_problem
+        master_prob.create_model()
+        master_prob.write_model()
+        master_prob.set_params(self.solver_params)
+        # create sub problem
+        self.sub_problem = SubProblemScip(self.dam_data)
+        sub_prob = self.sub_problem
+        sub_prob.write_model()
+        # pass data into callback
+        # stores the given info in the 'data' attribute of scip model
+        callback_data = self.CallbackData(dam_data=self.dam_data, bid_id_2_bbidvar=master_prob.bid_id_2_bbidvar,
+                                          sp=sub_prob, prob_type=ds.ProblemType.NoPrb, times_called_lazy=0,
+                                          times_added_cut=0)
+        self.callback = callback_data
+        # run benders decomposition
+        constraint_handler = LazyConstraintCallbackScip()
+        master_prob.solve_model_with_callback(constraint_handler, callback_data)
+        return self._get_solver_output()
 
     def _solve_unrestricted_problem(self):
         # create master problem
@@ -1099,13 +1176,14 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         return cuts_added
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids, prob):
-        self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
+        # self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
         if prob is ds.ProblemType.NoPab:
-            self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
-            self._generate_gcuts_for_no_pab(accepted_block_bids, rejected_block_bids)
+            # self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
+            pass
         elif prob is ds.ProblemType.NoPrb:
             # self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
             pass
+        self._generate_gcuts(prob, accepted_block_bids, rejected_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
         model = self.model
@@ -1149,26 +1227,33 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
             coeffs.append(1)
         model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) >= rhs, local=True)
 
-    def _generate_gcuts_for_no_pab(self, accepted_block_bids, rejected_block_bids):
+    def _generate_gcuts(self, problem_type, accepted_block_bids, rejected_block_bids):
         model = self.model
         dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
         bid_id_2_block_bid = dam_data.dam_bids.bid_id_2_block_bid
-        market_clearing_prices = self._find_market_clearing_prices(accepted_block_bids)
+        market_clearing_prices = self._find_market_clearing_prices(accepted_block_bids, rejected_block_bids)
 
-        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid)
+        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
+            if problem_type is ds.ProblemType.NoPab else []
+        prbs = du.find_prbs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
+            if problem_type is ds.ProblemType.NoPrb else []
         for pab in pabs:
-            variables, coefficients, rhs = du.create_gcut_for_pab(pab, accepted_block_bids, rejected_block_bids,
-                                                                  bid_id_2_block_bid, bid_id_2_bbidvar)
+            variables, coefficients, rhs = du.create_gcut_for_pab(
+                pab, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
+            model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coefficients)) >= rhs)
+        for prb in prbs:
+            variables, coefficients, rhs = du.create_gcut_for_prb(
+                prb, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
             model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coefficients)) >= rhs)
 
-    def _find_market_clearing_prices(self, accepted_block_bids):
-        # TODO: modify to be able to handle no-prb case as well
+    def _find_market_clearing_prices(self, accepted_block_bids, rejected_block_bids):
         # solve sub-problem again to obtain dual values
-        # restrict accepted block bids as well
+        # restrict accepted and rejected block bids
         model = self.model
         dam_data, bid_id_2_bbidvar, sp, prob, times_called_lazy, times_added_cut = model.data
         sp.model.freeTransform()
         sp.restrict_accepted_block_bids(accepted_block_bids)
+        sp.restrict_rejected_block_bids(rejected_block_bids)
         sp.solve_model()
         # TODO: replace 'balance_' with a defined constant
         market_clearing_prices = [model.getDualsolLinear(con) for con in model.getConss()

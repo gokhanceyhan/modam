@@ -1,0 +1,9 @@
+cplex==12.8.0.0
+Cython==0.29
+gurobipy==8.0.1
+numpy==1.15.4
+pandas==0.23.4
+PySCIPOpt==2.1.0
+python-dateutil==2.7.5
+pytz==2018.7
+six==1.11.0

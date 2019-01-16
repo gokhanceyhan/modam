@@ -91,6 +91,15 @@ def find_pabs(market_clearing_prices, accepted_block_bid_ids, bid_id_2_block_bid
     return pabs
 
 
+def find_prbs(market_clearing_prices, rejected_block_bid_ids, bid_id_2_block_bid):
+    prbs = []
+    for rejected_block_bid_id in rejected_block_bid_ids:
+        rejected_block_bid = bid_id_2_block_bid[rejected_block_bid_id]
+        if is_rejected_block_bid_prb(rejected_block_bid, market_clearing_prices):
+            prbs.append(rejected_block_bid)
+    return prbs
+
+
 def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
 
     if pab.is_supply:
@@ -98,6 +107,17 @@ def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid
                                                                   bid_id_2_block_bid, bid_id_2_bbid_var)
     else:
         variables, coefficients, rhs = create_gcut_for_demand_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids,
+                                                                  bid_id_2_block_bid, bid_id_2_bbid_var)
+    return variables, coefficients, rhs
+
+
+def create_gcut_for_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
+
+    if prb.is_supply:
+        variables, coefficients, rhs = create_gcut_for_supply_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids,
+                                                                  bid_id_2_block_bid, bid_id_2_bbid_var)
+    else:
+        variables, coefficients, rhs = create_gcut_for_demand_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids,
                                                                   bid_id_2_block_bid, bid_id_2_bbid_var)
     return variables, coefficients, rhs
 
@@ -127,6 +147,32 @@ def create_gcut_for_supply_pab(pab, accepted_block_bid_ids, rejected_block_bid_i
     return variables, coefficients, rhs
 
 
+def create_gcut_for_supply_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid,
+                               bid_id_2_bbid_var):
+    variables = [bid_id_2_bbid_var[prb.bid_id]]
+    coefficients = [1]
+    rhs = 1
+    rejected_supply_block_bid_ids = [bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id
+                                     and bid_id_2_block_bid[bid_id].is_supply]
+    accepted_demand_block_bid_ids = [bid_id for bid_id in accepted_block_bid_ids if bid_id != prb.bid_id
+                                     and not bid_id_2_block_bid[bid_id].is_supply]
+    # find intersecting rejected supply block bids
+    for bbid_id in rejected_supply_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(prb, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(1)
+
+    # find intersecting accepted demand block bids
+    for bbid_id in accepted_demand_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(prb, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(-1)
+            rhs -= 1
+    return variables, coefficients, rhs
+
+
 def create_gcut_for_demand_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid,
                                bid_id_2_bbid_var):
     variables = [bid_id_2_bbid_var[pab.bid_id]]
@@ -150,5 +196,31 @@ def create_gcut_for_demand_pab(pab, accepted_block_bid_ids, rejected_block_bid_i
             variables.append(bid_id_2_bbid_var[bbid_id])
             coefficients.append(1)
     return variables, coefficients, rhs
+
+
+def create_gcut_for_demand_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid,
+                               bid_id_2_bbid_var):
+    variables = [bid_id_2_bbid_var[prb.bid_id]]
+    coefficients = [1]
+    rhs = 1
+    rejected_demand_block_bid_ids = [bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id
+                                     and not bid_id_2_block_bid[bid_id].is_supply]
+    accepted_supply_block_bid_ids = [bid_id for bid_id in accepted_block_bid_ids if bid_id != prb.bid_id
+                                     and bid_id_2_block_bid[bid_id].is_supply]
+    # find intersecting rejected demand block bids
+    for bbid_id in rejected_demand_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(prb, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(1)
+    # find intersecting accepted supply block bids
+    for bbid_id in accepted_supply_block_bid_ids:
+        block_bid = bid_id_2_block_bid[bbid_id]
+        if do_block_bids_have_common_period(prb, block_bid):
+            variables.append(bid_id_2_bbid_var[bbid_id])
+            coefficients.append(-1)
+            rhs -= 1
+    return variables, coefficients, rhs
+
 
 
