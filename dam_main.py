@@ -169,10 +169,10 @@ if __name__ == "__main__":
     _num_threads = None
     if len(sys.argv) > 7 and sys.argv[8] is not None:
         _num_threads = int(sys.argv[8])
-        if _solver is ds.Solver.Scip:
-            print('Scip can only be run with single thread')
-            usage()
-            sys.exit(-1)
+        # if ds.Solver.Scip in _solver:
+        #     print('Scip can only be run with single thread')
+        #     usage()
+        #     sys.exit(-1)
 
     _path = sys.argv[1]
     _run_mode = sys.argv[2]
