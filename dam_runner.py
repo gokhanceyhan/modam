@@ -14,9 +14,9 @@ class DamRunner(object):
     """Implements runner class for day-ahead market optimization"""
 
     def __init__(
-            self, input_file_name, problem_type=ds.ProblemType.NoPab, solver=ds.Solver.Gurobi,
-            method=ds.SolutionApproach.PrimalDual, time_limit=60, relative_gap_tolerance=1e-4):
+            self, input_file_name, problem_type, solver, method, time_limit, relative_gap_tolerance, num_threads):
         self._input_file_name = input_file_name
+        self._num_threads = num_threads
         self._problem_type = problem_type
         self._solver = solver
         self._method = method
@@ -41,6 +41,10 @@ class DamRunner(object):
         """Returns the method used to solve the problem"""
         return self._method
 
+    def num_threads(self):
+        """Returns the number of threads to be used by the solver"""
+        return self._num_threads
+
     def time_limit(self):
         """Returns the time limit set on the solver"""
         return self._time_limit
@@ -64,7 +68,8 @@ class DamRunner(object):
         # create input data stats
         self._input_stats = di.InputStats(dam_data)
         # solve problem
-        params = ds.SolverParameters(time_limit=self._time_limit, rel_gap=self._relative_gap_tolerance)
+        params = ds.SolverParameters(
+            time_limit=self._time_limit, rel_gap=self._relative_gap_tolerance, num_threads=self._num_threads)
         if self._solver is ds.Solver.Gurobi:
             dam_solver = ds.DamSolverGurobi(self._problem_type, self._method, dam_data, params)
         elif self._solver is ds.Solver.Cplex:
@@ -89,17 +94,18 @@ class BatchRunner(object):
     """Implements batch runner for day-ahead market optimization"""
 
     def __init__(
-            self, input_file_names, problem_types, solvers, methods, time_limits, relative_gap_tolerances):
+            self, input_file_names, problem_types, solvers, methods, time_limit, relative_gap_tolerance, num_threads):
         self._input_file_names = input_file_names
         self._problem_types = problem_types
         self._solvers = solvers
         self._methods = methods
-        self._time_limits = time_limits
-        self._relative_gap_tolerances = relative_gap_tolerances
+        self._time_limit = time_limit
+        self._relative_gap_tolerance = relative_gap_tolerance
+        self._num_threads = num_threads
         self._runners = []
 
     def runners(self):
-        """Returns the runners created and run"""
+        """Returns the runners created"""
         return self._runners
 
     def run(self):
@@ -109,11 +115,8 @@ class BatchRunner(object):
             for problem_type in self._problem_types:
                 for solver in self._solvers:
                     for method in self._methods:
-                        for time_limit in self._time_limits:
-                            for rel_gap_tol in self._relative_gap_tolerances:
-                                dam_runner = DamRunner(
-                                    file_name, problem_type=problem_type, solver=solver, method=method,
-                                    time_limit=time_limit, relative_gap_tolerance=rel_gap_tol)
-                                dam_runner.run()
-                                runners.append(dam_runner)
-
+                        dam_runner = DamRunner(
+                            file_name, problem_type, solver, method, self._time_limit, self._relative_gap_tolerance,
+                            self._num_threads)
+                        dam_runner.run()
+                        runners.append(dam_runner)

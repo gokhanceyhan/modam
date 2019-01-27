@@ -25,7 +25,8 @@ class Solver(Enum):
 
 
 class SolverParameters:
-    def __init__(self, time_limit=None, rel_gap=None):
+    def __init__(self, num_threads=1, time_limit=600, rel_gap=1e-6):
+        self.num_threads = num_threads
         self.time_limit = time_limit
         self.rel_gap = rel_gap
 

@@ -191,6 +191,7 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         self.model.Params.LogToConsole = 0
         self.model.Params.MIPGap = self.solver_params.rel_gap
         self.model.Params.TimeLimit = self.solver_params.time_limit
+        self.model.Params.Threads = self.solver_params.num_threads
 
     def _get_best_solution(self):
         # fill solution
@@ -243,6 +244,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
     def _set_params(self):
         self.model.parameters.mip.tolerances.mipgap.set(self.solver_params.rel_gap)
         self.model.parameters.timelimit.set(self.solver_params.time_limit)
+        self.model.parameters.threads.set(self.solver_params.num_threads)
         self.model.set_log_stream('cplex.log')
         self.model.set_results_stream('cplex.log')
         self.model.set_warning_stream('cplex.log')
@@ -299,6 +301,8 @@ class PrimalDualScipSolver(PrimalDualSolver):
     def _set_params(self):
         self.model.setRealParam('limits/gap', self.solver_params.rel_gap)
         self.model.setRealParam('limits/time', self.solver_params.time_limit)
+        # SCIP must be compiled in multi-thread mode to allow multi-thread mip
+        self.model.setIntParam('parallel/maxnthreads', self.solver_params.num_threads)
         self.model.hideOutput()
 
     def _get_best_solution(self):

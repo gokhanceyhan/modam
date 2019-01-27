@@ -19,9 +19,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def single_run(filename, problem, solver, method):
+def single_run(filename, problem, solver, method, time_limit=None, relative_gap_tolerance=None, num_threads=None):
+    time_limit = time_limit or 600
+    relative_gap_tolerance = relative_gap_tolerance or 1e-6
+    num_threads = num_threads or 1
     runner = dr.DamRunner(
-        filename, problem_type=problem, solver=solver, method=method, time_limit=60, relative_gap_tolerance=1e-6)
+        filename, problem_type=problem, solver=solver, method=method, time_limit=time_limit,
+        relative_gap_tolerance=relative_gap_tolerance, num_threads=num_threads)
     runner.run()
     if runner.output().optimization_stats().number_of_solutions() == 0:
         print('Failed to find a solution')
@@ -33,17 +37,19 @@ def single_run(filename, problem, solver, method):
         print('Failed to find a valid solution')
 
 
-def batch_run(input_folder_name):
+def batch_run(
+        input_folder_name, problem, solver, method, time_limit=None, relative_gap_tolerance=None, num_threads=None):
     path = os.path.relpath(input_folder_name)
     input_file_names = [
         '/'.join([path, file]) for file in os.listdir(input_folder_name) if os.path.splitext(file)[1] == '.csv']
-    problem_types = [ds.ProblemType.NoPrb]
-    solvers = [ds.Solver.Cplex]
-    methods = [ds.SolutionApproach.Benders]
-    time_limits = [60]
-    relative_gap_tolerances = [1e-6]
+    problem_types = problem if isinstance(problem, list) else [problem]
+    solvers = solver if isinstance(solver, list) else [solver]
+    methods = method if isinstance(method, list) else [method]
+    time_limit = time_limit or 600
+    relative_gap_tolerance = relative_gap_tolerance or 1e-6
+    num_threads = num_threads or 1
     batch_runner = dr.BatchRunner(
-        input_file_names, problem_types, solvers, methods, time_limits, relative_gap_tolerances)
+        input_file_names, problem_types, solvers, methods, time_limit, relative_gap_tolerance, num_threads)
     batch_runner.run()
     runners = batch_runner.runners()
     write_runners_to_file(runners)
@@ -95,67 +101,94 @@ def usage():
     print('usage: dam_main.py path run_mode problem solver method')
     print('path: relative path to the problem file(s)')
     print('run mode: {single, batch}')
-    print('problem (required for run mode "single"): {Unrestricted, NoPab, NoPrb}')
-    print('solver (required for run mode "single"): {gurobi, cplex, scip}')
-    print('method (required for run mode "single"): {primal-dual, benders, branch-and-bound(only scip)}')
+    print('problem: {Unrestricted, NoPab, NoPrb}')
+    print('solver: {gurobi, cplex, scip}')
+    print('method: {primal-dual, benders, branch-and-bound(only if the solver is scip)}')
+    print('time limit in seconds: optional, default=600')
+    print('relative mip gap tolerance: optional, default=1e-6')
+    print('number of threads: optional, default=1 (cannot use scip with multiple threads)')
 
 
 if __name__ == "__main__":
-
-    if len(sys.argv) < 2:
-        usage()
-        sys.exit(-1)
-
-    _path = sys.argv[1]
-    _run_mode = sys.argv[2]
-    if _run_mode == 'batch':
-        batch_run(_path)
-        sys.exit(-1)
-    elif _run_mode == 'single':
-        pass
-    else:
-        usage()
-        sys.exit(-1)
 
     if len(sys.argv) < 5:
         usage()
         sys.exit(-1)
 
-    _prob = None
-    if sys.argv[3].lower() == 'unrestricted':
-        _prob = ds.ProblemType.Unrestricted
-    elif sys.argv[3].lower() == 'nopab':
-        _prob = ds.ProblemType.NoPab
-    elif sys.argv[3].lower() == 'noprb':
-        _prob = ds.ProblemType.NoPrb
-    else:
+    _prob = []
+    if not sys.argv[3]:
         usage()
         sys.exit(-1)
+    problems = sys.argv[3].split(',')
+    for problem in problems:
+        if problem.lower() == 'unrestricted':
+            _prob.append(ds.ProblemType.Unrestricted)
+        elif problem.lower() == 'nopab':
+            _prob.append(ds.ProblemType.NoPab)
+        elif problem.lower() == 'noprb':
+            _prob.append(ds.ProblemType.NoPrb)
 
-    _solver = None
-    if sys.argv[4].lower() == 'gurobi':
-        _solver = ds.Solver.Gurobi
-    elif sys.argv[4].lower() == 'cplex':
-        _solver = ds.Solver.Cplex
-    elif sys.argv[4].lower() == 'scip':
-        _solver = ds.Solver.Scip
-    else:
+    _solver = []
+    if not sys.argv[4]:
         usage()
         sys.exit(-1)
+    solvers = sys.argv[4].split(',')
+    for solver in solvers:
+        if solver.lower() == 'gurobi':
+            _solver.append(ds.Solver.Gurobi)
+        elif solver.lower() == 'cplex':
+            _solver.append(ds.Solver.Cplex)
+        elif solver.lower() == 'scip':
+            _solver.append(ds.Solver.Scip)
 
-    _method = None
-    if sys.argv[5].lower() == 'primal-dual':
-        _method = ds.SolutionApproach.PrimalDual
-    elif sys.argv[5].lower() == 'benders':
-        _method = ds.SolutionApproach.Benders
-    elif sys.argv[5].lower() == 'branch-and-bound':
-        _method = ds.SolutionApproach.BranchAndBound
-        if _solver is not ds.Solver.Scip:
-            print('You can only use Scip')
+    _method = []
+    if not sys.argv[5]:
+        usage()
+        sys.exit(-1)
+    methods = sys.argv[5].split(',')
+    for method in methods:
+        if method.lower() == 'primal-dual':
+            _method.append(ds.SolutionApproach.PrimalDual)
+        elif method.lower() == 'benders':
+            _method.append(ds.SolutionApproach.Benders)
+        elif method.lower() == 'branch-and-bound':
+            if not (len(_solver) == 1 and _solver[0] is ds.Solver.Scip):
+                print('You can only use Scip with method branch-and-bound')
+                usage()
+                sys.exit(-1)
+            _method.append(ds.SolutionApproach.BranchAndBound)
+
+    _time_limit = None
+    if len(sys.argv) > 5 and sys.argv[6] is not None:
+        _time_limit = int(sys.argv[6])
+
+    _relative_gap_tolerance = None
+    if len(sys.argv) > 6 and sys.argv[7] is not None:
+        _relative_gap_tolerance = float(sys.argv[7])
+
+    _num_threads = None
+    if len(sys.argv) > 7 and sys.argv[8] is not None:
+        _num_threads = int(sys.argv[8])
+        if _solver is ds.Solver.Scip:
+            print('Scip can only be run with single thread')
             usage()
             sys.exit(-1)
+
+    _path = sys.argv[1]
+    _run_mode = sys.argv[2]
+    if _run_mode == 'batch':
+        batch_run(
+            _path, _prob, _solver, _method, time_limit=_time_limit, relative_gap_tolerance=_relative_gap_tolerance,
+            num_threads=_num_threads)
+        sys.exit(-1)
+    elif _run_mode == 'single':
+        single_run(
+            _path, _prob[0], _solver[0], _method[0], time_limit=_time_limit,
+            relative_gap_tolerance=_relative_gap_tolerance, num_threads=_num_threads)
+        sys.exit(-1)
     else:
         usage()
         sys.exit(-1)
 
-    single_run(_path, _prob, _solver, _method)
+
+
