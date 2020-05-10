@@ -25,7 +25,7 @@ class PrimalDualModel:
         return self.prob_name + '.mps'
 
     def _write_model(self):
-        self.model.write(self.prob_name + '.mps')
+        self.model.write(self.prob_name + '.lp')
 
     def _create_variables(self):
         self._create_hbidvars()
