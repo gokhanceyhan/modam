@@ -140,4 +140,3 @@ class BranchAndBoundScip(object):
         else:
             best_solution = None
         return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
-

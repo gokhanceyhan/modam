@@ -50,23 +50,20 @@ class DamData:
             link = row[dc.DAM_DATA_BID_LINK_HEADER]
 
             if bid_type == BidType.BLOCK.value:
-                block_bid = BlockBid(bid_id, num_of_periods, period, price,
-                                     quantity, link)
+                block_bid = BlockBid(bid_id, num_of_periods, period, price, quantity, link)
                 bid_id_2_block_bid.update({block_bid.bid_id: block_bid})
             elif bid_type == BidType.FLEXIBLE.value:
                 flexible_bid = FlexibleBid(bid_id, num_of_periods, price, quantity)
                 bid_id_2_flexible_bid.update({flexible_bid.bid_id: flexible_bid})
             elif bid_id not in bid_id_2_hourly_bid:
-                hourly_bid = HourlyBid(bid_id, num_of_periods, period, price,
-                                       quantity)
+                hourly_bid = HourlyBid(bid_id, num_of_periods, period, price, quantity)
                 bid_id_2_hourly_bid.update({hourly_bid.bid_id: hourly_bid})
             else:
                 bid_id_2_hourly_bid[bid_id].add_price_quantity_pair(price, quantity)
         # create simple bids from hourly bids
         for bid_id, hourly_bid in bid_id_2_hourly_bid.items():
             hourly_bid.step_id_2_simple_bid = du.create_simple_bids_from_hourly_bid(hourly_bid)
-        self.dam_bids = DamBids(bid_id_2_hourly_bid, bid_id_2_block_bid,
-                                bid_id_2_flexible_bid)
+        self.dam_bids = DamBids(bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid)
 
 
 class DamBids:

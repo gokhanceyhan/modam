@@ -111,6 +111,7 @@ def usage():
 
 if __name__ == "__main__":
 
+    print(sys.argv)
     if len(sys.argv) < 5:
         usage()
         sys.exit(-1)

@@ -246,9 +246,8 @@ class MasterProblemGurobi(MasterProblem):
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
             step_id_2_sbidvars = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
-                step_id_2_sbidvars[step_id] = self.model.addVar(vtype=grb.GRB.CONTINUOUS,
-                                                                name='x_' + str(bid_id) + '_' + str(step_id), lb=0,
-                                                                ub=1)
+                step_id_2_sbidvars[step_id] = self.model.addVar(
+                    vtype=grb.GRB.CONTINUOUS, name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
             self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvars
 
     def _create_bbidvars(self):
@@ -387,8 +386,8 @@ class CallbackGurobi:
             # assess if the current node solution is valid
             if model._sp.objval > node_obj + dc.OBJ_COMP_TOL:
                 # add lazy constraint to cut this solution
-                CallbackGurobi._generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids,
-                                                   model._bid_id_2_bbidvar)
+                CallbackGurobi._generate_lazy_cuts(
+                    model, accepted_block_bids, rejected_block_bids, model._bid_id_2_bbidvar)
 
     @staticmethod
     def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
@@ -445,8 +444,9 @@ class CallbackGurobi:
         sp.restrict_rejected_block_bids(rejected_block_bids)
         sp.solve_model()
         # TODO: replace 'balance_' with a defined constant
-        balance_constraints = [sp.model.getConstrByName('balance_' + str(period))
-                               for period in range(1, dam_data.number_of_periods + 1, 1)]
+        balance_constraints = [
+            sp.model.getConstrByName('balance_' + str(period)) for period in 
+            range(1, dam_data.number_of_periods + 1, 1)]
         market_clearing_prices = sp.model.getAttr('Pi', balance_constraints)
         return market_clearing_prices
 
@@ -752,14 +752,12 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids):
         prob_type = self._prob
-        # self._generate_combinatorial_cut_martin(list(accepted_block_bids.values()),
-        #                                         list(rejected_block_bids.values()))
-        if prob_type is ds.ProblemType.NoPab:
-            # self._generate_combinatorial_cut_madani_no_pab(list(accepted_block_bids.values()))
-            pass
-        elif prob_type is ds.ProblemType.NoPrb:
-            # self._generate_combinatorial_cut_madani_no_prb(list(rejected_block_bids.values()))
-            pass
+        # self._generate_combinatorial_cut_martin(
+        # list(accepted_block_bids.values()), list(rejected_block_bids.values()))
+        # if prob_type is ds.ProblemType.NoPab:
+        #     self._generate_combinatorial_cut_madani_no_pab(list(accepted_block_bids.values()))
+        # elif prob_type is ds.ProblemType.NoPrb:
+        #     self._generate_combinatorial_cut_madani_no_prb(list(rejected_block_bids.values()))
         self._generate_gcuts(prob_type, accepted_block_bids, rejected_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
@@ -813,8 +811,8 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         sp.restrict_rejected_block_bids(rejected_block_bids)
         sp.solve_model()
         solution = sp.model.solution
-        market_clearing_prices = solution.get_dual_values(['balance_' + str(period)
-                                                           for period in range(1, dam_data.number_of_periods + 1, 1)])
+        market_clearing_prices = solution.get_dual_values(
+            ['balance_' + str(period) for period in range(1, dam_data.number_of_periods + 1, 1)])
         return market_clearing_prices
 
 
@@ -1012,8 +1010,8 @@ class MasterProblemScip(MasterProblem):
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             variables.append(bid_id_2_bbidvar[bid_id])
             coeffs.append(block_bid.num_period * block_bid.price * block_bid.quantity)
-        self.model.setObjective(scip.quicksum(variable * coeff for variable, coeff in zip(variables, coeffs)),
-                                'maximize')
+        self.model.setObjective(
+            scip.quicksum(variable * coeff for variable, coeff in zip(variables, coeffs)), 'maximize')
 
     def _create_balance_constraints(self):
         bid_id_2_hbidvars = self.bid_id_2_hbidvars
@@ -1033,8 +1031,8 @@ class MasterProblemScip(MasterProblem):
                 coeffs.append(block_bid.quantity)
         for period, expr in period_2_expr.items():
             variables, coeffs = expr
-            constraint = self.model.addCons(scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) == 0.0,
-                                            'balance_' + str(period))
+            constraint = self.model.addCons(
+                scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) == 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
 
     def create_model(self):
@@ -1070,10 +1068,10 @@ class MasterProblemScip(MasterProblem):
         :param callback_data
         :return:
         """
-        self.model.includeConshdlr(constraint_handler, "Lazy", "Constraint handler for Lazy Constraint",
-                                   sepapriority=0, enfopriority=-1, chckpriority=-1, sepafreq=-1, propfreq=-1,
-                                   eagerfreq=-1, maxprerounds=0, delaysepa=False, delayprop=False, needscons=False,
-                                   presoltiming=scip.SCIP_PRESOLTIMING.FAST, proptiming=scip.SCIP_PROPTIMING.BEFORELP)
+        self.model.includeConshdlr(
+            constraint_handler, "Lazy", "Constraint handler for Lazy Constraint", sepapriority=0, enfopriority=-1, 
+            chckpriority=-1, sepafreq=-1, propfreq=-1, eagerfreq=-1, maxprerounds=0, delaysepa=False, delayprop=False, 
+            needscons=False, presoltiming=scip.SCIP_PRESOLTIMING.FAST, proptiming=scip.SCIP_PROPTIMING.BEFORELP)
 
         self.model.data = callback_data
         self.model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
@@ -1197,12 +1195,10 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids, prob):
         # self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
-        if prob is ds.ProblemType.NoPab:
-            # self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
-            pass
-        elif prob is ds.ProblemType.NoPrb:
-            # self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
-            pass
+        # if prob is ds.ProblemType.NoPab:
+        #     self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
+        # elif prob is ds.ProblemType.NoPrb:
+        #     self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
         self._generate_gcuts(prob, accepted_block_bids, rejected_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):

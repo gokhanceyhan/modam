@@ -25,7 +25,7 @@ class PrimalDualModel:
         return self.prob_name + '.mps'
 
     def _write_model(self):
-        self.model.write(self.prob_name + '.mps')
+        self.model.write(self.prob_name + '.lp')
 
     def _create_variables(self):
         self._create_hbidvars()
@@ -42,10 +42,10 @@ class PrimalDualModel:
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
             step_id_2_sbidvar = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
-                pvar = self.model.addVar(vtype=grb.GRB.CONTINUOUS,
-                                         name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
-                dvar = self.model.addVar(vtype=grb.GRB.CONTINUOUS,
-                                         name='s_' + str(bid_id) + '_' + str(step_id), lb=0)
+                pvar = self.model.addVar(
+                    vtype=grb.GRB.CONTINUOUS, name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
+                dvar = self.model.addVar(
+                    vtype=grb.GRB.CONTINUOUS, name='s_' + str(bid_id) + '_' + str(step_id), lb=0)
                 step_id_2_sbidvar[step_id] = (pvar, dvar)
             self.bid_id_2_step_id_2_sbidvar[bid_id] = step_id_2_sbidvar
 
@@ -63,8 +63,9 @@ class PrimalDualModel:
 
     def _create_price_variables(self):
         for period in range(self.dam_data.number_of_periods):
-            var = self.model.addVar(vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=self.dam_data.min_price,
-                                    ub=self.dam_data.max_price)
+            var = self.model.addVar(
+                vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=self.dam_data.min_price, 
+                ub=self.dam_data.max_price)
             self.period_2_pi[period+1] = var
 
     def _create_obj_function(self):
