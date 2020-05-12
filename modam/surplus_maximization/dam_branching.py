@@ -3,9 +3,10 @@
 from collections import namedtuple
 
 import pyscipopt as scip
-import dam_solver as ds
-import dam_benders as db
 
+from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
+    ProblemType
+from modam.surplus_maximization.dam_benders import MasterProblemCplex, MasterProblemGurobi
 
 class BranchAndBoundScip(object):
 
@@ -55,7 +56,7 @@ class BranchAndBoundScip(object):
         self.master_problem = db.MasterProblemScip(self.dam_data)
 
     def solve(self):
-        if self.prob_type is ds.ProblemType.NoPab:
+        if self.prob_type is ProblemType.NoPab:
             return self._solve_no_pab()
 
     def _solve_no_pab(self):
@@ -94,7 +95,7 @@ class BranchAndBoundScip(object):
         master_problem = self.master_problem
         model = master_problem.fixed
         # fill dam solution object
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = model.getObjVal()
         for bid_id, var in master_problem.bid_id_2_bbidvar.items():
             value = model.getVal(var)
@@ -127,16 +128,16 @@ class BranchAndBoundScip(object):
         elapsed_time = model.getSolvingTime()
         number_of_solutions = len(model.getSols())
         number_of_nodes = model.getNNodes()
-        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        optimization_stats = OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
         # collect optimization status
         status = model.getStatus()
         best_bound = model.getDualbound()
         mip_relative_gap = model.getGap()
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             master_problem.solve_fixed_model()
             best_solution = self._get_best_solution()
         else:
             best_solution = None
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)

@@ -1,13 +1,16 @@
 from collections import namedtuple
 from abc import abstractmethod
+
 import gurobipy as grb
 import cplex as cpx
 from cplex.callbacks import LazyConstraintCallback
 import pyscipopt as scip
-import dam_constants as dc
-import dam_solver as ds
-import dam_utils as du
-from dam_exceptions import UnsupportedProblemException
+
+from modam.surplus_maximization.dam_common import BendersDecompositionStats, DamSolution, DamSolverOutput, \
+    OptimizationStats, OptimizationStatus, ProblemType, SolutionApproach, Solver, SolverParameters
+import modam.surplus_maximization.dam_constants as dc
+from modam.surplus_maximization.dam_exceptions import UnsupportedProblemException
+import modam.surplus_maximization.dam_utils as du
 
 
 class BendersDecomposition(object):
@@ -124,11 +127,11 @@ class BendersDecompositionGurobi(BendersDecomposition):
         BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
 
     def solve(self):
-        if self.prob_type is ds.ProblemType.NoPab:
+        if self.prob_type is ProblemType.NoPab:
             return self._solve_no_pab()
-        elif self.prob_type is ds.ProblemType.NoPrb:
+        elif self.prob_type is ProblemType.NoPrb:
             return self._solve_no_prb()
-        elif self.prob_type is ds.ProblemType.Unrestricted:
+        elif self.prob_type is ProblemType.Unrestricted:
             return self._solve_unrestricted_problem()
         else:
             raise UnsupportedProblemException(
@@ -150,7 +153,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
         master_prob.model._dam_data = self.dam_data
         master_prob.model._bid_id_2_bbidvar = master_prob.bid_id_2_bbidvar
         master_prob.model._sp = sub_prob
-        master_prob.model._prob = ds.ProblemType.NoPab
+        master_prob.model._prob = ProblemType.NoPab
         master_prob.model._num_of_subproblems = 0
         master_prob.model._num_of_user_cuts = 0
 
@@ -175,7 +178,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
         master_prob.model._dam_data = self.dam_data
         master_prob.model._bid_id_2_bbidvar = master_prob.bid_id_2_bbidvar
         master_prob.model._sp = sub_prob
-        master_prob.model._prob = ds.ProblemType.NoPrb
+        master_prob.model._prob = ProblemType.NoPrb
         master_prob.model._num_of_subproblems = 0
         master_prob.model._num_of_user_cuts = 0
 
@@ -199,7 +202,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
     def _get_best_solution(self):
         # fill solution
         mp = self.master_problem
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = mp.fixed.ObjVal
         y = mp.fixed.getAttr('X', mp.bid_id_2_bbidvar)
         for bid_id, value in y.items():
@@ -218,23 +221,23 @@ class BendersDecompositionGurobi(BendersDecomposition):
         number_of_nodes = model.NodeCount
         number_of_subproblems_solved = model._num_of_subproblems
         number_of_user_cuts_added = model._num_of_user_cuts
-        benders_stats = ds.BendersDecompositionStats(
+        benders_stats = BendersDecompositionStats(
             number_of_user_cuts_added=number_of_user_cuts_added,
             number_of_subproblems_solved=number_of_subproblems_solved)
-        optimization_stats = ds.OptimizationStats(
+        optimization_stats = OptimizationStats(
             elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
         # collect optimization status
         status = model.Status
         best_bound = model.ObjBound
         mip_relative_gap = model.MIPGap
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             self.master_problem.solve_fixed_model()
             best_solution = self._get_best_solution()
         else:
             best_solution = None
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class MasterProblemGurobi(MasterProblem):
@@ -376,9 +379,9 @@ class CallbackGurobi:
                     accepted_block_bids.append(bid_id)
             # update sub problem
             model._sp.reset_block_bid_bounds(model._bid_id_2_bbidvar)
-            if model._prob is ds.ProblemType.NoPab:
+            if model._prob is ProblemType.NoPab:
                 model._sp.restrict_rejected_block_bids(rejected_block_bids)
-            elif model._prob is ds.ProblemType.NoPrb:
+            elif model._prob is ProblemType.NoPrb:
                 model._sp.restrict_accepted_block_bids(accepted_block_bids)
             # solve sub problem
             model._sp.solve_model()
@@ -416,9 +419,9 @@ class CallbackGurobi:
         market_clearing_prices = CallbackGurobi._find_market_clearing_prices(
             model, accepted_block_bids, rejected_block_bids)
         pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
-            if model._prob is ds.ProblemType.NoPab else []
+            if model._prob is ProblemType.NoPab else []
         prbs = du.find_prbs(market_clearing_prices, rejected_block_bids, bid_id_2_block_bid) \
-            if model._prob is ds.ProblemType.NoPrb else []
+            if model._prob is ProblemType.NoPrb else []
         for pab in pabs:
             variables, coefficients, rhs = du.create_gcut_for_pab(
                 pab, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
@@ -459,11 +462,11 @@ class BendersDecompositionCplex(BendersDecomposition):
         BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
 
     def solve(self):
-        if self.prob_type is ds.ProblemType.NoPab:
+        if self.prob_type is ProblemType.NoPab:
             return self._solve_no_pab()
-        elif self.prob_type is ds.ProblemType.NoPrb:
+        elif self.prob_type is ProblemType.NoPrb:
             return self._solve_no_prb()
-        elif self.prob_type is ds.ProblemType.Unrestricted:
+        elif self.prob_type is ProblemType.Unrestricted:
             return self._solve_unrestricted_problem()
         else:
             raise UnsupportedProblemException(
@@ -483,7 +486,7 @@ class BendersDecompositionCplex(BendersDecomposition):
 
         # run benders decomposition
         start_time = master_prob.model.get_time()
-        master_prob.solve_model_with_callback(sub_prob, ds.ProblemType.NoPab)
+        master_prob.solve_model_with_callback(sub_prob, ProblemType.NoPab)
         end_time = master_prob.model.get_time()
         elapsed_time = end_time - start_time
         return self._get_solver_output(elapsed_time)
@@ -502,7 +505,7 @@ class BendersDecompositionCplex(BendersDecomposition):
 
         # run benders decomposition
         start_time = master_prob.model.get_time()
-        master_prob.solve_model_with_callback(sub_prob, ds.ProblemType.NoPrb)
+        master_prob.solve_model_with_callback(sub_prob, ProblemType.NoPrb)
         end_time = master_prob.model.get_time()
         elapsed_time = end_time - start_time
         return self._get_solver_output(elapsed_time)
@@ -526,7 +529,7 @@ class BendersDecompositionCplex(BendersDecomposition):
         solution = mp.fixed.solution
         # solution.write('solution.sol')
         # fill dam solution object
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = solution.get_objective_value()
         for bid_id, var in mp.bid_id_2_bbidvar.items():
             value = solution.get_values(var)
@@ -549,23 +552,23 @@ class BendersDecompositionCplex(BendersDecomposition):
             master_problem.callback_instance else 0
         number_of_user_cuts_added = master_problem.callback_instance._cuts_added if \
             master_problem.callback_instance else 0
-        benders_stats = ds.BendersDecompositionStats(
+        benders_stats = BendersDecompositionStats(
             number_of_user_cuts_added=number_of_user_cuts_added,
             number_of_subproblems_solved=number_of_subproblems_solved)
-        optimization_stats = ds.OptimizationStats(
+        optimization_stats = OptimizationStats(
             elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
         # collect optimization status
         status = solution.get_status()
         best_bound = solution.MIP.get_best_objective()
         mip_relative_gap = solution.MIP.get_mip_relative_gap() if number_of_solutions >= 1 else -1
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             master_problem.solve_fixed_model()
             best_solution = self._get_best_solution()
         else:
             best_solution = None
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class MasterProblemCplex(MasterProblem):
@@ -739,9 +742,9 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
                 accepted_block_bids[bid_id] = ind
         # update sub problem
         sp.reset_block_bid_bounds(bid_id_2_bbid_var_index.values())
-        if prob is ds.ProblemType.NoPab:
+        if prob is ProblemType.NoPab:
             sp.restrict_rejected_block_bids(rejected_block_bids.values())
-        elif prob is ds.ProblemType.NoPrb:
+        elif prob is ProblemType.NoPrb:
             sp.restrict_accepted_block_bids(accepted_block_bids.values())
         # solve sub problem
         sp.solve_model()
@@ -754,9 +757,9 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         prob_type = self._prob
         # self._generate_combinatorial_cut_martin(
         # list(accepted_block_bids.values()), list(rejected_block_bids.values()))
-        # if prob_type is ds.ProblemType.NoPab:
+        # if prob_type is ProblemType.NoPab:
         #     self._generate_combinatorial_cut_madani_no_pab(list(accepted_block_bids.values()))
-        # elif prob_type is ds.ProblemType.NoPrb:
+        # elif prob_type is ProblemType.NoPrb:
         #     self._generate_combinatorial_cut_madani_no_prb(list(rejected_block_bids.values()))
         self._generate_gcuts(prob_type, accepted_block_bids, rejected_block_bids)
 
@@ -786,9 +789,9 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         market_clearing_prices = self._find_market_clearing_prices(
             list(accepted_block_bids.values()), list(rejected_block_bids.values()))
         pabs = du.find_pabs(market_clearing_prices, list(accepted_block_bids.keys()), bid_id_2_block_bid) \
-            if problem_type is ds.ProblemType.NoPab else []
+            if problem_type is ProblemType.NoPab else []
         prbs = du.find_prbs(market_clearing_prices, list(rejected_block_bids.keys()), bid_id_2_block_bid) \
-            if problem_type is ds.ProblemType.NoPrb else []
+            if problem_type is ProblemType.NoPrb else []
         for pab in pabs:
             variables, coefficients, rhs = du.create_gcut_for_pab(
                 pab, list(accepted_block_bids.keys()), list(rejected_block_bids.keys()), bid_id_2_block_bid,
@@ -856,11 +859,11 @@ class BendersDecompositionScip(BendersDecomposition):
         BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
 
     def solve(self):
-        if self.prob_type is ds.ProblemType.NoPab:
+        if self.prob_type is ProblemType.NoPab:
             return self._solve_no_pab()
-        elif self.prob_type is ds.ProblemType.NoPrb:
+        elif self.prob_type is ProblemType.NoPrb:
             return self._solve_no_prb()
-        elif self.prob_type is ds.ProblemType.Unrestricted:
+        elif self.prob_type is ProblemType.Unrestricted:
             return self._solve_unrestricted_problem()
         else:
             raise UnsupportedProblemException(
@@ -881,7 +884,7 @@ class BendersDecompositionScip(BendersDecomposition):
         # stores the given info in the 'data' attribute of scip model
         callback_data = BendersDecompositionScip.CallbackData(
             dam_data=self.dam_data, bid_id_2_bbidvar=master_prob.bid_id_2_bbidvar, sp=sub_prob,
-            prob_type=ds.ProblemType.NoPab)
+            prob_type=ProblemType.NoPab)
         # run benders decomposition
         constraint_handler = LazyConstraintCallbackScip()
         master_prob.solve_model_with_callback(constraint_handler, callback_data)
@@ -902,7 +905,7 @@ class BendersDecompositionScip(BendersDecomposition):
         # stores the given info in the 'data' attribute of scip model
         callback_data = BendersDecompositionScip.CallbackData(
             dam_data=self.dam_data, bid_id_2_bbidvar=master_prob.bid_id_2_bbidvar, sp=sub_prob,
-            prob_type=ds.ProblemType.NoPab)
+            prob_type=ProblemType.NoPab)
         # run benders decomposition
         constraint_handler = LazyConstraintCallbackScip()
         master_prob.solve_model_with_callback(constraint_handler, callback_data)
@@ -921,7 +924,7 @@ class BendersDecompositionScip(BendersDecomposition):
     def _get_best_solution(self):
         model = self.master_problem.fixed
         # fill dam solution object
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = model.getObjVal()
         for bid_id, var in self.master_problem.bid_id_2_bbidvar.items():
             value = model.getVal(var)
@@ -956,16 +959,16 @@ class BendersDecompositionScip(BendersDecomposition):
         number_of_nodes = model.getNNodes()
         number_of_subproblems_solved = model.data.times_called_lazy()
         number_of_user_cuts_added = model.data.times_added_cut()
-        benders_stats = ds.BendersDecompositionStats(
+        benders_stats = BendersDecompositionStats(
             number_of_user_cuts_added=number_of_user_cuts_added,
             number_of_subproblems_solved=number_of_subproblems_solved)
-        optimization_stats = ds.OptimizationStats(
+        optimization_stats = OptimizationStats(
             elapsed_time, number_of_nodes, number_of_solutions, benders_decomposition_stats=benders_stats)
         # collect optimization status
         status = model.getStatus()
         best_bound = model.getDualbound()
         mip_relative_gap = model.getGap()
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             master_problem.solve_fixed_model()
@@ -976,7 +979,7 @@ class BendersDecompositionScip(BendersDecomposition):
         self.master_problem.model.freeProb()
         if self.sub_problem:
             self.sub_problem.model.freeProb()
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class MasterProblemScip(MasterProblem):
@@ -1179,9 +1182,9 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
                 accepted_block_bids.append(bbid_id)
         # update sub problem
         sp.reset_block_bid_bounds()
-        if prob_type is ds.ProblemType.NoPab:
+        if prob_type is ProblemType.NoPab:
             sp.restrict_rejected_block_bids(rejected_block_bids)
-        elif prob_type is ds.ProblemType.NoPrb:
+        elif prob_type is ProblemType.NoPrb:
             sp.restrict_accepted_block_bids(accepted_block_bids)
         # solve sub problem
         sp.solve_model()
@@ -1195,9 +1198,9 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids, prob):
         # self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
-        # if prob is ds.ProblemType.NoPab:
+        # if prob is ProblemType.NoPab:
         #     self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
-        # elif prob is ds.ProblemType.NoPrb:
+        # elif prob is ProblemType.NoPrb:
         #     self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
         self._generate_gcuts(prob, accepted_block_bids, rejected_block_bids)
 
@@ -1259,9 +1262,9 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         market_clearing_prices = self._find_market_clearing_prices(accepted_block_bids, rejected_block_bids)
 
         pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
-            if problem_type is ds.ProblemType.NoPab else []
+            if problem_type is ProblemType.NoPab else []
         prbs = du.find_prbs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
-            if problem_type is ds.ProblemType.NoPrb else []
+            if problem_type is ProblemType.NoPrb else []
         for pab in pabs:
             variables, coefficients, rhs = du.create_gcut_for_pab(
                 pab, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)

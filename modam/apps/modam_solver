@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+
+"""Runs the modam solver"""
+
+from modam.executor import ExecutorApp
+
+ExecutorApp().run()

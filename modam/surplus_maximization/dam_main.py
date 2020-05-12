@@ -11,8 +11,8 @@ import logging
 import sys
 import csv
 
-import dam_solver as ds
-import dam_runner as dr
+from modam.surplus_maximization.dam_common import ProblemType, SolutionApproach, Solver
+import modam.surplus_maximization.dam_runner as dr
 
 
 logging.basicConfig(level=logging.INFO)
@@ -123,11 +123,11 @@ if __name__ == "__main__":
     problems = sys.argv[3].split(',')
     for problem in problems:
         if problem.lower() == 'unrestricted':
-            _prob.append(ds.ProblemType.Unrestricted)
+            _prob.append(ProblemType.Unrestricted)
         elif problem.lower() == 'nopab':
-            _prob.append(ds.ProblemType.NoPab)
+            _prob.append(ProblemType.NoPab)
         elif problem.lower() == 'noprb':
-            _prob.append(ds.ProblemType.NoPrb)
+            _prob.append(ProblemType.NoPrb)
 
     _solver = []
     if not sys.argv[4]:
@@ -136,11 +136,11 @@ if __name__ == "__main__":
     solvers = sys.argv[4].split(',')
     for solver in solvers:
         if solver.lower() == 'gurobi':
-            _solver.append(ds.Solver.Gurobi)
+            _solver.append(Solver.Gurobi)
         elif solver.lower() == 'cplex':
-            _solver.append(ds.Solver.Cplex)
+            _solver.append(Solver.Cplex)
         elif solver.lower() == 'scip':
-            _solver.append(ds.Solver.Scip)
+            _solver.append(Solver.Scip)
 
     _method = []
     if not sys.argv[5]:
@@ -149,15 +149,15 @@ if __name__ == "__main__":
     methods = sys.argv[5].split(',')
     for method in methods:
         if method.lower() == 'primal-dual':
-            _method.append(ds.SolutionApproach.PrimalDual)
+            _method.append(SolutionApproach.PrimalDual)
         elif method.lower() == 'benders':
-            _method.append(ds.SolutionApproach.Benders)
+            _method.append(SolutionApproach.Benders)
         elif method.lower() == 'branch-and-bound':
-            if not (len(_solver) == 1 and _solver[0] is ds.Solver.Scip):
+            if not (len(_solver) == 1 and _solver[0] is Solver.Scip):
                 print('You can only use Scip with method branch-and-bound')
                 usage()
                 sys.exit(-1)
-            _method.append(ds.SolutionApproach.BranchAndBound)
+            _method.append(SolutionApproach.BranchAndBound)
 
     _time_limit = None
     if len(sys.argv) > 5 and sys.argv[6] is not None:
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     _num_threads = None
     if len(sys.argv) > 7 and sys.argv[8] is not None:
         _num_threads = int(sys.argv[8])
-        # if ds.Solver.Scip in _solver:
+        # if Solver.Scip in _solver:
         #     print('Scip can only be run with single thread')
         #     usage()
         #     sys.exit(-1)

@@ -4,18 +4,20 @@ Created on Thu Aug  2 21:07:42 2018
 @author: gokhanceyhan
 """
 
-import pandas as pd
 from abc import abstractmethod
 from enum import Enum
-import dam_constants as dc
-import dam_utils as du
 import logging
+import pandas as pd
+
+import modam.surplus_maximization.dam_constants as dc
+import modam.surplus_maximization.dam_utils as du
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class DamData:
+
     def __init__(self):
         self.dam_bids = None
     # minimum allowable bid price
@@ -145,6 +147,7 @@ class FlexibleBid(Bid):
 
 
 class BidType(Enum):
+
     HOURLY = 'S'
     BLOCK = 'B'
     FLEXIBLE = 'F'

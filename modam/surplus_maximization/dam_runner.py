@@ -2,8 +2,9 @@
 
 import logging
 
-import dam_input as di
-import dam_solver as ds
+from modam.surplus_maximization.dam_common import Solver, SolverParameters
+from modam.surplus_maximization.dam_input import DamData, InputStats
+from modam.surplus_maximization.dam_solver import DamSolverCplex, DamSolverGurobi, DamSolverScip
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,19 +64,19 @@ class DamRunner(object):
 
     def run(self):
         # create dam input data
-        dam_data = di.DamData()
+        dam_data = DamData()
         dam_data.read_input(self._input_file_name)
         # create input data stats
-        self._input_stats = di.InputStats(dam_data)
+        self._input_stats = InputStats(dam_data)
         # solve problem
-        params = ds.SolverParameters(
+        params = SolverParameters(
             time_limit=self._time_limit, rel_gap=self._relative_gap_tolerance, num_threads=self._num_threads)
-        if self._solver is ds.Solver.Gurobi:
-            dam_solver = ds.DamSolverGurobi(self._problem_type, self._method, dam_data, params)
-        elif self._solver is ds.Solver.Cplex:
-            dam_solver = ds.DamSolverCplex(self._problem_type, self._method, dam_data, params)
+        if self._solver is Solver.Gurobi:
+            dam_solver = DamSolverGurobi(self._problem_type, self._method, dam_data, params)
+        elif self._solver is Solver.Cplex:
+            dam_solver = DamSolverCplex(self._problem_type, self._method, dam_data, params)
         else:
-            dam_solver = ds.DamSolverScip(self._problem_type, self._method, dam_data, params)
+            dam_solver = DamSolverScip(self._problem_type, self._method, dam_data, params)
         # log run info
         logger.info('/'.join(
             [self._input_file_name, self._problem_type.value, self._solver.value, self._method.value,
