@@ -1,5 +1,6 @@
-from collections import namedtuple
 from abc import abstractmethod
+from collections import namedtuple
+import os
 
 import gurobipy as grb
 import cplex as cpx
@@ -14,12 +15,14 @@ import modam.surplus_maximization.dam_utils as du
 
 
 class BendersDecomposition(object):
-    def __init__(self, prob_type, dam_data, solver_params):
+
+    def __init__(self, prob_type, dam_data, solver_params, working_dir):
         self.prob_type = prob_type
         self.dam_data = dam_data
         self.solver_params = solver_params
         self.master_problem = None
         self.sub_problem = None
+        self._working_dir = working_dir
 
     @abstractmethod
     def solve(self):
@@ -43,7 +46,8 @@ class BendersDecomposition(object):
 
 
 class MasterProblem(object):
-    def __init__(self, dam_data):
+
+    def __init__(self, dam_data, working_dir):
         self.dam_data = dam_data
         self.model = None
         self.fixed = None
@@ -51,6 +55,7 @@ class MasterProblem(object):
         self.bid_id_2_hbidvars = {}
         self.bid_id_2_bbidvar = {}
         self.period_2_balance_con = {}
+        self._working_dir = working_dir
 
     @abstractmethod
     def _create_hbidvars(self):
@@ -98,8 +103,9 @@ class MasterProblem(object):
 
 
 class SubProblem(object):
-    def __init__(self, *args):
-        pass
+
+    def __init__(self, working_dir, *args):
+        self._working_dir = working_dir
 
     @abstractmethod
     def reset_block_bid_bounds(self, *args):
@@ -123,8 +129,6 @@ class SubProblem(object):
 
 
 class BendersDecompositionGurobi(BendersDecomposition):
-    def __init__(self, prob_type, dam_data, solver_params):
-        BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
 
     def solve(self):
         if self.prob_type is ProblemType.NoPab:
@@ -139,14 +143,14 @@ class BendersDecompositionGurobi(BendersDecomposition):
 
     def _solve_no_pab(self):
         # create master problem
-        self.master_problem = MasterProblemGurobi(self.dam_data)
+        self.master_problem = MasterProblemGurobi(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
 
         # create sub problem
-        self.sub_problem = SubProblemGurobi(master_prob)
+        self.sub_problem = SubProblemGurobi(master_prob, self._working_dir)
         sub_prob = self.sub_problem
 
         # pass data into callback
@@ -164,14 +168,14 @@ class BendersDecompositionGurobi(BendersDecomposition):
 
     def _solve_no_prb(self):
         # create master problem
-        self.master_problem = MasterProblemGurobi(self.dam_data)
+        self.master_problem = MasterProblemGurobi(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
 
         # create sub problem
-        self.sub_problem = SubProblemGurobi(master_prob)
+        self.sub_problem = SubProblemGurobi(master_prob, self._working_dir)
         sub_prob = self.sub_problem
 
         # pass data into callback
@@ -189,7 +193,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
 
     def _solve_unrestricted_problem(self):
         # create master problem
-        self.master_problem = MasterProblemGurobi(self.dam_data)
+        self.master_problem = MasterProblemGurobi(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
@@ -241,8 +245,9 @@ class BendersDecompositionGurobi(BendersDecomposition):
 
 
 class MasterProblemGurobi(MasterProblem):
-    def __init__(self, dam_data):
-        MasterProblem.__init__(self, dam_data)
+
+    def __init__(self, dam_data, working_dir):
+        MasterProblem.__init__(self, dam_data, working_dir)
         self.model = grb.Model('master')
 
     def _create_hbidvars(self):
@@ -296,7 +301,7 @@ class MasterProblemGurobi(MasterProblem):
 
     def write_model(self):
         # write model
-        self.model.write('master.lp')
+        self.model.write(os.path.join(self._working_dir, 'master.lp'))
 
     def set_params(self, solver_params):
         self.model.Params.LogToConsole = 0
@@ -324,8 +329,9 @@ class MasterProblemGurobi(MasterProblem):
 
 
 class SubProblemGurobi(SubProblem):
-    def __init__(self, master_problem):
-        SubProblem.__init__(self)
+
+    def __init__(self, master_problem, working_dir):
+        SubProblem.__init__(self, working_dir)
         self.model = master_problem.model.copy().relax()
         self.objval = None
 
@@ -349,7 +355,7 @@ class SubProblemGurobi(SubProblem):
 
     def write_model(self):
         # write model
-        self.model.write('sub.lp')
+        self.model.write(os.path.join(self._working_dir, 'sub.lp'))
 
     def solve_model(self):
         # set parameters
@@ -360,6 +366,7 @@ class SubProblemGurobi(SubProblem):
 
 
 class CallbackGurobi:
+
     def __init__(self):
         pass
 
@@ -455,11 +462,8 @@ class CallbackGurobi:
 
 
 class BendersDecompositionCplex(BendersDecomposition):
-    """
-    Note: Block bid variable indices are communicated across the class instead of bid_ids and variables.
-    """
-    def __init__(self, prob_type, dam_data, solver_params):
-        BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
+
+    """Note: Block bid variable indices are communicated across the class instead of bid_ids and variables."""
 
     def solve(self):
         if self.prob_type is ProblemType.NoPab:
@@ -474,14 +478,14 @@ class BendersDecompositionCplex(BendersDecomposition):
 
     def _solve_no_pab(self):
         # create master problem
-        self.master_problem = MasterProblemCplex(self.dam_data)
+        self.master_problem = MasterProblemCplex(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
 
         # create sub problem
-        self.sub_problem = SubProblemCplex(master_prob)
+        self.sub_problem = SubProblemCplex(master_prob, self._working_dir)
         sub_prob = self.sub_problem
 
         # run benders decomposition
@@ -493,14 +497,14 @@ class BendersDecompositionCplex(BendersDecomposition):
 
     def _solve_no_prb(self):
         # create master problem
-        self.master_problem = MasterProblemCplex(self.dam_data)
+        self.master_problem = MasterProblemCplex(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
 
         # create sub problem
-        self.sub_problem = SubProblemCplex(master_prob)
+        self.sub_problem = SubProblemCplex(master_prob, self._working_dir)
         sub_prob = self.sub_problem
 
         # run benders decomposition
@@ -512,7 +516,7 @@ class BendersDecompositionCplex(BendersDecomposition):
 
     def _solve_unrestricted_problem(self):
         # create master problem
-        self.master_problem = MasterProblemCplex(self.dam_data)
+        self.master_problem = MasterProblemCplex(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
@@ -572,8 +576,9 @@ class BendersDecompositionCplex(BendersDecomposition):
 
 
 class MasterProblemCplex(MasterProblem):
-    def __init__(self, dam_data):
-        MasterProblem.__init__(self, dam_data)
+
+    def __init__(self, dam_data, working_dir):
+        MasterProblem.__init__(self, dam_data, working_dir)
         self.model = cpx.Cplex()
         self.name_2_ind = None
         self.callback_instance = None
@@ -636,15 +641,16 @@ class MasterProblemCplex(MasterProblem):
         self.name_2_ind = {n: j for j, n in enumerate(self.model.variables.get_names())}
 
     def write_model(self):
-        self.model.write('master.lp')
+        self.model.write(os.path.join(self._working_dir, "master.lp"))
 
     def set_params(self, solver_params):
         self.model.parameters.mip.tolerances.mipgap.set(solver_params.rel_gap)
         self.model.parameters.timelimit.set(solver_params.time_limit)
         self.model.parameters.threads.set(solver_params.num_threads)
-        self.model.set_log_stream('cplex.log')
-        self.model.set_results_stream('cplex.log')
-        self.model.set_warning_stream('cplex.log')
+        log_file = os.path.join(self._working_dir, "cplex.log")
+        self.model.set_log_stream(log_file)
+        self.model.set_results_stream(log_file)
+        self.model.set_warning_stream(log_file)
 
     def solve_model(self):
         self.model.solve()
@@ -684,8 +690,9 @@ class MasterProblemCplex(MasterProblem):
 
 
 class SubProblemCplex(SubProblem):
-    def __init__(self, master_problem):
-        SubProblem.__init__(self)
+
+    def __init__(self, master_problem, working_dir):
+        SubProblem.__init__(self, working_dir)
         self.model = cpx.Cplex(master_problem.model)
         self.model.set_problem_type(self.model.problem_type.LP)
         self.write_model()
@@ -712,7 +719,7 @@ class SubProblemCplex(SubProblem):
 
     def write_model(self):
         # write model
-        self.model.write('sub.lp')
+        self.model.write(os.path.join(self._working_dir, "sub.lp"))
 
     def solve_model(self):
         # solve model
@@ -855,9 +862,6 @@ class BendersDecompositionScip(BendersDecomposition):
         def add_cut(self):
             self._times_added_cut += 1
 
-    def __init__(self, prob_type, dam_data, solver_params):
-        BendersDecomposition.__init__(self, prob_type, dam_data, solver_params)
-
     def solve(self):
         if self.prob_type is ProblemType.NoPab:
             return self._solve_no_pab()
@@ -871,13 +875,13 @@ class BendersDecompositionScip(BendersDecomposition):
 
     def _solve_no_pab(self):
         # create master problem
-        self.master_problem = MasterProblemScip(self.dam_data)
+        self.master_problem = MasterProblemScip(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
         # create sub problem
-        self.sub_problem = SubProblemScip(self.dam_data)
+        self.sub_problem = SubProblemScip(self.dam_data, self._working_dir)
         sub_prob = self.sub_problem
         sub_prob.write_model()
         # pass data into callback
@@ -892,13 +896,13 @@ class BendersDecompositionScip(BendersDecomposition):
 
     def _solve_no_prb(self):
         # create master problem
-        self.master_problem = MasterProblemScip(self.dam_data)
+        self.master_problem = MasterProblemScip(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
         master_prob.set_params(self.solver_params)
         # create sub problem
-        self.sub_problem = SubProblemScip(self.dam_data)
+        self.sub_problem = SubProblemScip(self.dam_data, self._working_dir)
         sub_prob = self.sub_problem
         sub_prob.write_model()
         # pass data into callback
@@ -913,7 +917,7 @@ class BendersDecompositionScip(BendersDecomposition):
 
     def _solve_unrestricted_problem(self):
         # create master problem
-        self.master_problem = MasterProblemScip(self.dam_data)
+        self.master_problem = MasterProblemScip(self.dam_data, self._working_dir)
         master_prob = self.master_problem
         master_prob.create_model()
         master_prob.write_model()
@@ -934,7 +938,7 @@ class BendersDecompositionScip(BendersDecomposition):
                 dam_soln.accepted_block_bids.append(bid_id)
         # get market clearing prices by creating a master_problem and solving its relaxation with Gurobi
         # since there are problems with getting dual variable values with scip LP solver
-        grb_master_problem = MasterProblemGurobi(self.dam_data)
+        grb_master_problem = MasterProblemGurobi(self.dam_data, self._working_dir)
         grb_master_problem.create_model()
         grb_master_problem.set_params(self.solver_params)
         for bid_id in dam_soln.rejected_block_bids:
@@ -957,8 +961,8 @@ class BendersDecompositionScip(BendersDecomposition):
         elapsed_time = model.getSolvingTime()
         number_of_solutions = len(model.getSols())
         number_of_nodes = model.getNNodes()
-        number_of_subproblems_solved = model.data.times_called_lazy()
-        number_of_user_cuts_added = model.data.times_added_cut()
+        number_of_subproblems_solved = model.data.times_called_lazy() if model.data is not None else 0
+        number_of_user_cuts_added = model.data.times_added_cut() if model.data is not None else 0
         benders_stats = BendersDecompositionStats(
             number_of_user_cuts_added=number_of_user_cuts_added,
             number_of_subproblems_solved=number_of_subproblems_solved)
@@ -983,8 +987,9 @@ class BendersDecompositionScip(BendersDecomposition):
 
 
 class MasterProblemScip(MasterProblem):
-    def __init__(self, dam_data):
-        MasterProblem.__init__(self, dam_data)
+
+    def __init__(self, dam_data, working_dir):
+        MasterProblem.__init__(self, dam_data, working_dir)
         self.model = scip.Model('master')
 
     def _create_hbidvars(self):
@@ -1049,7 +1054,7 @@ class MasterProblemScip(MasterProblem):
 
     def write_model(self):
         # write model
-        self.model.writeProblem('master.lp')
+        self.model.writeProblem(os.path.join(self._working_dir, "master.lp"))
 
     def set_params(self, solver_params):
         self.model.setRealParam('limits/gap', solver_params.rel_gap)
@@ -1108,10 +1113,11 @@ class MasterProblemScip(MasterProblem):
 
 
 class SubProblemScip(SubProblem):
-    def __init__(self, dam_data):
-        SubProblem.__init__(self)
+
+    def __init__(self, dam_data, working_dir):
+        SubProblem.__init__(self, working_dir)
         # create a copy of the master problem
-        copy_master = MasterProblemScip(dam_data)
+        copy_master = MasterProblemScip(dam_data, working_dir)
         copy_master.create_model()
         for var in copy_master.bid_id_2_bbidvar.values():
             copy_master.model.chgVarType(var, 'C')
@@ -1151,7 +1157,7 @@ class SubProblemScip(SubProblem):
 
     def write_model(self):
         # write model
-        self.model.writeProblem('sub.lp')
+        self.model.writeProblem(os.path.join(self._working_dir, "sub.lp"))
 
     def solve_model(self):
         # solve model
@@ -1160,6 +1166,7 @@ class SubProblemScip(SubProblem):
 
 
 class LazyConstraintCallbackScip(scip.Conshdlr):
+
     def _add_cut(self, check_only, sol):
         """Do not add cut if this method is called by conscheck(check_only=True)"""
         model = self.model
@@ -1288,8 +1295,8 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         sp.restrict_rejected_block_bids(rejected_block_bids)
         sp.solve_model()
         # TODO: replace 'balance_' with a defined constant
-        market_clearing_prices = [model.getDualsolLinear(con) for con in model.getConss()
-                                  if con.name.find('balance') != -1]
+        market_clearing_prices = [
+            model.getDualsolLinear(con) for con in model.getConss() if con.name.find('balance') != -1]
         return market_clearing_prices[:dam_data.number_of_periods]
 
     def conscheck(self, constraints, solution, check_integrality, check_lp_rows, print_reason, completely):

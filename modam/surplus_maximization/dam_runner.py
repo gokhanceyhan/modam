@@ -15,7 +15,8 @@ class DamRunner(object):
     """Implements runner class for day-ahead market optimization"""
 
     def __init__(
-            self, input_file_name, problem_type, solver, method, time_limit, relative_gap_tolerance, num_threads):
+            self, input_file_name, problem_type, solver, method, time_limit, relative_gap_tolerance, num_threads, 
+            working_dir):
         self._input_file_name = input_file_name
         self._num_threads = num_threads
         self._problem_type = problem_type
@@ -25,6 +26,7 @@ class DamRunner(object):
         self._relative_gap_tolerance = relative_gap_tolerance
         self._input_stats = None
         self._output = None
+        self._working_dir = working_dir
 
     def input_file_name(self):
         """Returns the input file name"""
@@ -72,11 +74,11 @@ class DamRunner(object):
         params = SolverParameters(
             time_limit=self._time_limit, rel_gap=self._relative_gap_tolerance, num_threads=self._num_threads)
         if self._solver is Solver.Gurobi:
-            dam_solver = DamSolverGurobi(self._problem_type, self._method, dam_data, params)
+            dam_solver = DamSolverGurobi(self._problem_type, self._method, dam_data, params, self._working_dir)
         elif self._solver is Solver.Cplex:
-            dam_solver = DamSolverCplex(self._problem_type, self._method, dam_data, params)
+            dam_solver = DamSolverCplex(self._problem_type, self._method, dam_data, params, self._working_dir)
         else:
-            dam_solver = DamSolverScip(self._problem_type, self._method, dam_data, params)
+            dam_solver = DamSolverScip(self._problem_type, self._method, dam_data, params, self._working_dir)
         # log run info
         logger.info('/'.join(
             [self._input_file_name, self._problem_type.value, self._solver.value, self._method.value,

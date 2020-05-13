@@ -2,6 +2,8 @@
 
 from enum import Enum
 
+from modam.surplus_maximization.dam_utils import is_accepted_block_bid_pab, is_rejected_block_bid_prb
+
 
 class BendersDecompositionStats(object):
 
@@ -33,7 +35,7 @@ class DamSolution:
         self.is_valid = True
         for bid_id in self.accepted_block_bids:
             bid = dam_bids.bid_id_2_block_bid[bid_id]
-            if du.is_accepted_block_bid_pab(bid, self.market_clearing_prices):
+            if is_accepted_block_bid_pab(bid, self.market_clearing_prices):
                 self.is_valid = False
                 break
 
@@ -41,7 +43,7 @@ class DamSolution:
         self.is_valid = True
         for bid_id in self.rejected_block_bids:
             bid = dam_bids.bid_id_2_block_bid[bid_id]
-            if du.is_rejected_block_bid_prb(bid, self.market_clearing_prices):
+            if is_rejected_block_bid_prb(bid, self.market_clearing_prices):
                 self.is_valid = False
                 break
 
@@ -136,9 +138,9 @@ class ProblemType(Enum):
 
 class SolutionApproach(Enum):
 
-    PrimalDual = 'Primal-Dual'
-    Benders = 'Benders Decomposition'
-    BranchAndBound = 'Branch-and-Bound'
+    PrimalDual = 'PrimalDual'
+    Benders = 'BendersDecomposition'
+    BranchAndBound = 'BranchAndBound'
 
 
 class Solver(Enum):

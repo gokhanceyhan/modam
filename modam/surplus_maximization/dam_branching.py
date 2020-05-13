@@ -6,7 +6,7 @@ import pyscipopt as scip
 
 from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
     ProblemType
-from modam.surplus_maximization.dam_benders import MasterProblemCplex, MasterProblemGurobi
+from modam.surplus_maximization.dam_benders import MasterProblemGurobi, MasterProblemScip
 
 class BranchAndBoundScip(object):
 
@@ -49,15 +49,17 @@ class BranchAndBoundScip(object):
             #     model.chgVarUbNode(node, var, 0.0)
             return {"result": scip.SCIP_RESULT.BRANCHED}
 
-    def __init__(self, prob_type, dam_data, solver_params):
+    def __init__(self, prob_type, dam_data, solver_params, working_dir):
         self.prob_type = prob_type
         self.dam_data = dam_data
         self.solver_params = solver_params
-        self.master_problem = db.MasterProblemScip(self.dam_data)
+        self.master_problem = MasterProblemScip(self.dam_data, working_dir)
+        self._working_dir = working_dir
 
     def solve(self):
         if self.prob_type is ProblemType.NoPab:
             return self._solve_no_pab()
+        raise NotImplementedError()
 
     def _solve_no_pab(self):
         # create master problem
@@ -105,7 +107,7 @@ class BranchAndBoundScip(object):
                 dam_soln.accepted_block_bids.append(bid_id)
         # get market clearing prices by creating a master_problem and solving its relaxation with Gurobi
         # since there are problems with getting dual variable values with scip LP solver
-        grb_master_problem = db.MasterProblemGurobi(self.dam_data)
+        grb_master_problem = MasterProblemGurobi(self.dam_data, self._working_dir)
         grb_master_problem.create_model()
         grb_master_problem.set_params(self.solver_params)
         for bid_id in dam_soln.rejected_block_bids:

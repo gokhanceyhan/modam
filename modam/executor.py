@@ -71,6 +71,7 @@ class ExecutorApp:
         relative_gap_tolerance = float(args.mip_rel_gap)
         time_limit = int(args.time_limit)
         num_threads = int(args.num_threads)
+        working_dir = args.working_dir
         # a few argument value validations
         if method == SolutionApproach.BranchAndBound and solver != Solver.Scip:
             raise ValueError("the '%s' method can only be used with the '%s' solver" % (method.value, solver.value))
@@ -81,7 +82,7 @@ class ExecutorApp:
         else:
             executor = SurplusMaximizationSolverExecutor(
                 method=method, num_threads=num_threads, problem=problem, relative_gap_tolerance=relative_gap_tolerance, 
-                solver=solver, time_limit_in_seconds=time_limit)
+                solver=solver, time_limit_in_seconds=time_limit, working_dir=working_dir)
             executor.execute(data_file_path)
 
 
@@ -96,13 +97,14 @@ class SurplusMaximizationSolverExecutor:
 
     def __init__(
             self, method=SolutionApproach.Benders, num_threads=1, problem=ProblemType.Unrestricted, 
-            relative_gap_tolerance=1e-6, solver=Solver.Gurobi, time_limit_in_seconds=600):
+            relative_gap_tolerance=1e-6, solver=Solver.Gurobi, time_limit_in_seconds=600, working_dir=None):
         self._method = method
         self._num_threads = num_threads
         self._problem = problem
         self._relative_gap_tolerance = relative_gap_tolerance
         self._solver = solver
         self._time_limit_in_seconds = time_limit_in_seconds
+        self._working_dir = working_dir
     
     def batch_execute(self, file_names):
         """Executes the surplus maximization solver in batch for the given problem data files"""
@@ -122,7 +124,7 @@ class SurplusMaximizationSolverExecutor:
         runner = DamRunner(
             file_name, problem_type=self._problem, solver=self._solver, method=self._method, 
             time_limit=self._time_limit_in_seconds, relative_gap_tolerance=self._relative_gap_tolerance, 
-            num_threads=self._num_threads)
+            num_threads=self._num_threads, working_dir=self._working_dir)
         runner.run()
         if runner.output().optimization_stats().number_of_solutions() == 0:
             logger.INFO('Failed to find a solution')

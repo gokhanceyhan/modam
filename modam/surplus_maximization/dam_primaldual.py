@@ -1,4 +1,5 @@
 from abc import abstractmethod
+import os
 
 import gurobipy as grb
 import cplex as cpx
@@ -10,7 +11,8 @@ from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_lo
 
 
 class PrimalDualModel:
-    def __init__(self, prob_type, dam_data, prob_name):
+
+    def __init__(self, prob_type, dam_data, prob_name, working_dir):
         self.prob_type = prob_type
         self.dam_data = dam_data
         self.prob_name = prob_name
@@ -19,16 +21,17 @@ class PrimalDualModel:
         self.bid_id_2_bbidvar = {}
         self.period_2_balance_con = {}
         self.period_2_pi = {}
+        self._working_dir = working_dir
 
     def create_model(self):
         self._create_variables()
         self._create_obj_function()
         self._create_constraints()
         self._write_model()
-        return self.prob_name + '.mps'
+        return os.path.join(self._working_dir, self.prob_name + '.mps')
 
     def _write_model(self):
-        self.model.write(self.prob_name + '.lp')
+        self.model.write(os.path.join(self._working_dir, self.prob_name + '.mps'))
 
     def _create_variables(self):
         self._create_hbidvars()
@@ -160,9 +163,11 @@ class PrimalDualModel:
 
 
 class PrimalDualSolver(object):
-    def __init__(self, prob_name, solver_params):
+
+    def __init__(self, prob_name, solver_params, working_dir):
         self.prob_name = prob_name
         self.solver_params = solver_params
+        self._working_dir = working_dir
 
     @abstractmethod
     def _set_params(self):
@@ -182,8 +187,9 @@ class PrimalDualSolver(object):
 
 
 class PrimalDualGurobiSolver(PrimalDualSolver):
-    def __init__(self, prob_name, solver_params):
-        PrimalDualSolver.__init__(self, prob_name, solver_params)
+
+    def __init__(self, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
         self.model = grb.read(prob_name)
 
     def solve(self):
@@ -232,8 +238,9 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
 
 
 class PrimalDualCplexSolver(PrimalDualSolver):
-    def __init__(self, prob_name, solver_params):
-        PrimalDualSolver.__init__(self, prob_name, solver_params)
+
+    def __init__(self, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
         self.model = cpx.Cplex(prob_name)
         self.model.read(prob_name)
 
@@ -249,9 +256,10 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         self.model.parameters.mip.tolerances.mipgap.set(self.solver_params.rel_gap)
         self.model.parameters.timelimit.set(self.solver_params.time_limit)
         self.model.parameters.threads.set(self.solver_params.num_threads)
-        self.model.set_log_stream('cplex.log')
-        self.model.set_results_stream('cplex.log')
-        self.model.set_warning_stream('cplex.log')
+        log_file = os.path.join(self._working_dir, 'cplex.log')
+        self.model.set_log_stream(log_file)
+        self.model.set_results_stream(log_file)
+        self.model.set_warning_stream(log_file)
 
     def _get_best_solution(self):
         solution = self.model.solution
@@ -292,8 +300,9 @@ class PrimalDualCplexSolver(PrimalDualSolver):
 
 
 class PrimalDualScipSolver(PrimalDualSolver):
-    def __init__(self, prob_name, solver_params):
-        PrimalDualSolver.__init__(self, prob_name, solver_params)
+
+    def __init__(self, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
         self.model = Model()
         self.model.readProblem(prob_name)
 
