@@ -1,13 +1,18 @@
 from abc import abstractmethod
+import os
+
 import gurobipy as grb
 import cplex as cpx
 from pyscipopt import Model
-import dam_utils as du
-import dam_solver as ds
+
+from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
+    ProblemType
+from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss
 
 
 class PrimalDualModel:
-    def __init__(self, prob_type, dam_data, prob_name):
+
+    def __init__(self, prob_type, dam_data, prob_name, working_dir):
         self.prob_type = prob_type
         self.dam_data = dam_data
         self.prob_name = prob_name
@@ -16,16 +21,17 @@ class PrimalDualModel:
         self.bid_id_2_bbidvar = {}
         self.period_2_balance_con = {}
         self.period_2_pi = {}
+        self._working_dir = working_dir
 
     def create_model(self):
         self._create_variables()
         self._create_obj_function()
         self._create_constraints()
         self._write_model()
-        return self.prob_name + '.mps'
+        return os.path.join(self._working_dir, self.prob_name + '.mps')
 
     def _write_model(self):
-        self.model.write(self.prob_name + '.lp')
+        self.model.write(os.path.join(self._working_dir, self.prob_name + '.mps'))
 
     def _create_variables(self):
         self._create_hbidvars()
@@ -55,9 +61,9 @@ class PrimalDualModel:
             dvar = self.model.addVar(vtype=grb.GRB.CONTINUOUS, name='s_' + str(bid_id), lb=0)
             lvar = self.model.addVar(vtype=grb.GRB.CONTINUOUS, name='l_' + str(bid_id), lb=0)
             mvar = self.model.addVar(vtype=grb.GRB.CONTINUOUS, name='m_' + str(bid_id), lb=0)
-            if self.prob_type is ds.ProblemType.NoPab:
+            if self.prob_type is ProblemType.NoPab:
                 lvar.ub = 0
-            if self.prob_type is ds.ProblemType.NoPrb:
+            if self.prob_type is ProblemType.NoPrb:
                 mvar.ub = 0
             self.bid_id_2_bbidvar[bid_id] = (pvar, dvar, lvar, mvar)
 
@@ -130,7 +136,7 @@ class PrimalDualModel:
             mexpr = grb.LinExpr(0.0)
             lexpr = grb.LinExpr(0.0)
             y, s, l, m = bid_id_2_bbidvar[bid_id]
-            bigm = du.calculate_bigm_for_block_bid_loss(block_bid)
+            bigm = calculate_bigm_for_block_bid_loss(block_bid)
             mexpr.addTerms([1, bigm], [m, y])
             lexpr.addTerms([1, -bigm], [l, y])
             model.addConstr(mexpr, grb.GRB.LESS_EQUAL, bigm, 'missed_surplus_' + str(bid_id))
@@ -157,9 +163,11 @@ class PrimalDualModel:
 
 
 class PrimalDualSolver(object):
-    def __init__(self, prob_name, solver_params):
+
+    def __init__(self, prob_name, solver_params, working_dir):
         self.prob_name = prob_name
         self.solver_params = solver_params
+        self._working_dir = working_dir
 
     @abstractmethod
     def _set_params(self):
@@ -179,8 +187,9 @@ class PrimalDualSolver(object):
 
 
 class PrimalDualGurobiSolver(PrimalDualSolver):
-    def __init__(self, prob_name, solver_params):
-        PrimalDualSolver.__init__(self, prob_name, solver_params)
+
+    def __init__(self, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
         self.model = grb.read(prob_name)
 
     def solve(self):
@@ -196,7 +205,7 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
 
     def _get_best_solution(self):
         # fill solution
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = -1 * self.model.ObjVal
         varname_2_bbidvar = {x.VarName: x for x in self.model.getVars() if x.VarName.find('y') != -1}
         y = self.model.getAttr('X', varname_2_bbidvar)
@@ -214,23 +223,24 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         elapsed_time = self.model.Runtime
         number_of_solutions = self.model.SolCount
         number_of_nodes = self.model.NodeCount
-        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        optimization_stats = OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
         # collect optimization status
         status = self.model.Status
         best_bound = self.model.ObjBound
         mip_relative_gap = self.model.MIPGap
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             best_solution = self._get_best_solution()
         else:
             best_solution = None
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class PrimalDualCplexSolver(PrimalDualSolver):
-    def __init__(self, prob_name, solver_params):
-        PrimalDualSolver.__init__(self, prob_name, solver_params)
+
+    def __init__(self, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
         self.model = cpx.Cplex(prob_name)
         self.model.read(prob_name)
 
@@ -246,14 +256,15 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         self.model.parameters.mip.tolerances.mipgap.set(self.solver_params.rel_gap)
         self.model.parameters.timelimit.set(self.solver_params.time_limit)
         self.model.parameters.threads.set(self.solver_params.num_threads)
-        self.model.set_log_stream('cplex.log')
-        self.model.set_results_stream('cplex.log')
-        self.model.set_warning_stream('cplex.log')
+        log_file = os.path.join(self._working_dir, 'cplex.log')
+        self.model.set_log_stream(log_file)
+        self.model.set_results_stream(log_file)
+        self.model.set_warning_stream(log_file)
 
     def _get_best_solution(self):
         solution = self.model.solution
         # fill dam solution object
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = -1 * solution.get_objective_value()
         bbid_varnames = [name for name in self.model.variables.get_names() if name.find('y') != -1]
         varname_2_y = {name: solution.get_values(name) for name in bbid_varnames}
@@ -274,23 +285,24 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         elapsed_time = elapsed_time
         number_of_solutions = solution.pool.get_num()
         number_of_nodes = solution.progress.get_num_nodes_processed()
-        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        optimization_stats = OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
         # collect optimization status
         status = solution.get_status()
         best_bound = solution.MIP.get_best_objective()
         mip_relative_gap = solution.MIP.get_mip_relative_gap() if number_of_solutions >= 1 else -1
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             best_solution = self._get_best_solution()
         else:
             best_solution = None
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)
 
 
 class PrimalDualScipSolver(PrimalDualSolver):
-    def __init__(self, prob_name, solver_params):
-        PrimalDualSolver.__init__(self, prob_name, solver_params)
+
+    def __init__(self, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
         self.model = Model()
         self.model.readProblem(prob_name)
 
@@ -309,7 +321,7 @@ class PrimalDualScipSolver(PrimalDualSolver):
     def _get_best_solution(self):
         model = self.model
         # fill dam solution object
-        dam_soln = ds.DamSolution()
+        dam_soln = DamSolution()
         dam_soln.total_surplus = -1 * model.getObjVal()
         varname_2_bbidvar = {x.name: x for x in model.getVars() if x.name.find('y') != -1}
         varname_2_y = {name: model.getVal(var) for name, var in varname_2_bbidvar.items()}
@@ -328,15 +340,15 @@ class PrimalDualScipSolver(PrimalDualSolver):
         elapsed_time = model.getSolvingTime()
         number_of_solutions = len(model.getSols())
         number_of_nodes = model.getNNodes()
-        optimization_stats = ds.OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
+        optimization_stats = OptimizationStats(elapsed_time, number_of_nodes, number_of_solutions)
         # collect optimization status
         status = model.getStatus()
         best_bound = model.getDualbound()
         mip_relative_gap = model.getGap()
-        optimization_status = ds.OptimizationStatus(status, mip_relative_gap, best_bound)
+        optimization_status = OptimizationStatus(status, mip_relative_gap, best_bound)
         # best solution query
         if number_of_solutions >= 1:
             best_solution = self._get_best_solution()
         else:
             best_solution = None
-        return ds.DamSolverOutput(best_solution, optimization_stats, optimization_status)
+        return DamSolverOutput(best_solution, optimization_stats, optimization_status)

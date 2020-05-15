@@ -1,4 +1,4 @@
-import dam_constants as dc
+import modam.surplus_maximization.dam_constants as dc
 
 
 def create_simple_bids_from_hourly_bid(hourly_bid):
