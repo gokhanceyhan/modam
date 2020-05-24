@@ -97,15 +97,17 @@ class BatchRunner(object):
     """Implements batch runner for day-ahead market optimization"""
 
     def __init__(
-            self, input_file_names, problem_types, solvers, methods, time_limit, relative_gap_tolerance, num_threads):
+            self, input_file_names, problem_type, solver, method, time_limit, relative_gap_tolerance, num_threads, 
+            working_dir):
         self._input_file_names = input_file_names
-        self._problem_types = problem_types
-        self._solvers = solvers
-        self._methods = methods
+        self._problem_type = problem_type
+        self._solver = solver
+        self._method = method
         self._time_limit = time_limit
         self._relative_gap_tolerance = relative_gap_tolerance
         self._num_threads = num_threads
         self._runners = []
+        self._working_dir = working_dir
 
     def runners(self):
         """Returns the runners created"""
@@ -115,11 +117,8 @@ class BatchRunner(object):
         """Runs optimization for all configurations"""
         runners = self._runners
         for file_name in self._input_file_names:
-            for problem_type in self._problem_types:
-                for solver in self._solvers:
-                    for method in self._methods:
-                        dam_runner = DamRunner(
-                            file_name, problem_type, solver, method, self._time_limit, self._relative_gap_tolerance,
-                            self._num_threads)
-                        dam_runner.run()
-                        runners.append(dam_runner)
+            dam_runner = DamRunner(
+                file_name, self._problem_type, self._solver, self._method, self._time_limit, 
+                self._relative_gap_tolerance, self._num_threads, self._working_dir)
+            dam_runner.run()
+            runners.append(dam_runner)

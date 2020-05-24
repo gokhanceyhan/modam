@@ -22,6 +22,9 @@ class PrimalDualModel:
         self.period_2_balance_con = {}
         self.period_2_pi = {}
         self._working_dir = working_dir
+        self.loss_expr = grb.LinExpr(0.0)
+        self.missed_surplus_expr = grb.LinExpr(0.0)
+        self.surplus_expr = grb.LinExpr(0.0)
 
     def create_model(self):
         self._create_variables()
@@ -84,6 +87,7 @@ class PrimalDualModel:
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             lin_expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.num_period * block_bid.price * block_bid.quantity)
         self.model.setObjective(lin_expr, grb.GRB.MAXIMIZE)
+        self.surplus_expr.add(lin_expr)
 
     def _create_balance_constraints(self):
         period_2_expr = {}
@@ -141,6 +145,8 @@ class PrimalDualModel:
             lexpr.addTerms([1, -bigm], [l, y])
             model.addConstr(mexpr, grb.GRB.LESS_EQUAL, bigm, 'missed_surplus_' + str(bid_id))
             model.addConstr(lexpr, grb.GRB.LESS_EQUAL, 0.0, 'loss_surplus_' + str(bid_id))
+            self.loss_expr.add(l)
+            self.missed_surplus_expr.add(m)
 
     def _create_strong_duality_constraint(self):
         bid_id_2_step_id_2_sbidvar = self.bid_id_2_step_id_2_sbidvar

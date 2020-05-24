@@ -2,6 +2,6 @@
 
 """Runs the modam solver"""
 
-from modam.executor import ExecutorApp
+from modam.executor import MultiObjectiveSolverExecutorApp
 
-ExecutorApp().run()
+MultiObjectiveSolverExecutorApp().run()
