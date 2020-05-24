@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+
+"""Runs the surplus maximization solver"""
+
+from modam.executor import SurplusMaximizationSolverExecutorApp
+
+SurplusMaximizationSolverExecutorApp().run()

@@ -1,3 +1,8 @@
+"""Implements the utility functions for the day-ahead market solver"""
+
+import csv
+import os
+
 import modam.surplus_maximization.dam_constants as dc
 
 
@@ -225,3 +230,44 @@ def create_gcut_for_demand_prb(
             coefficients.append(-1)
             rhs -= 1
     return variables, coefficients, rhs
+
+
+def write_runners_to_file(runners, working_dir):
+    file_path = os.path.join(working_dir, "tests.csv")
+    with open(file_path, mode='w') as csv_file:
+        fieldnames = [
+            'problem file', 'problem type', 'solver', 'method', 'time limit', 'relative gap tolerance', 'hourly bids',
+            'block bids', 'flexible bids', 'valid', 'total surplus', 'solver status', 'best bound', 'relative gap',
+            'elapsed solver time', 'number of solutions', 'number of nodes', 'number of subproblems',
+            'number of user cuts']
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for runner in runners:
+            writer.writerow(
+                {
+                    'problem file': runner.input_file_name(),
+                    'problem type': runner.problem_type().value,
+                    'solver': runner.solver().value,
+                    'method': runner.method().value,
+                    'time limit': runner.time_limit(),
+                    'relative gap tolerance': runner.relative_gap_tolerance(),
+                    'hourly bids': runner.input_stats().number_of_hourly_bids(),
+                    'block bids': runner.input_stats().number_of_block_bids(),
+                    'flexible bids': runner.input_stats().number_of_flexible_bids(),
+                    'valid':
+                        False if runner.output().dam_solution() is None else runner.output().dam_solution().is_valid,
+                    'total surplus':
+                        -1 if runner.output().dam_solution() is None else
+                        runner.output().dam_solution().total_surplus,
+                    'solver status': runner.output().optimization_status().solver_status(),
+                    'best bound': runner.output().optimization_status().best_bound(),
+                    'relative gap': runner.output().optimization_status().relative_gap(),
+                    'elapsed solver time': runner.output().optimization_stats().elapsed_time(),
+                    'number of solutions': runner.output().optimization_stats().number_of_solutions(),
+                    'number of nodes': runner.output().optimization_stats().number_of_nodes(),
+                    'number of subproblems':
+                        runner.output().optimization_stats().benders_decomposition_stats().number_of_subproblems_solved(),
+                    'number of user cuts':
+                        runner.output().optimization_stats().benders_decomposition_stats().number_of_user_cuts_added()
+                }
+            )
