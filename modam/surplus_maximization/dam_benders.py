@@ -401,8 +401,6 @@ class CallbackGurobi:
 
     @staticmethod
     def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
-        # CallbackGurobi._generate_combinatorial_cut_martin(
-        #     model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar)
         CallbackGurobi._generate_gcuts(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod
@@ -762,12 +760,6 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids):
         prob_type = self._prob
-        # self._generate_combinatorial_cut_martin(
-        # list(accepted_block_bids.values()), list(rejected_block_bids.values()))
-        # if prob_type is ProblemType.NoPab:
-        #     self._generate_combinatorial_cut_madani_no_pab(list(accepted_block_bids.values()))
-        # elif prob_type is ProblemType.NoPrb:
-        #     self._generate_combinatorial_cut_madani_no_prb(list(rejected_block_bids.values()))
         self._generate_gcuts(prob_type, accepted_block_bids, rejected_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
@@ -1204,11 +1196,6 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         return cuts_added
 
     def _generate_lazy_cuts(self, accepted_block_bids, rejected_block_bids, prob):
-        # self._generate_combinatorial_cut_martin(accepted_block_bids, rejected_block_bids)
-        # if prob is ProblemType.NoPab:
-        #     self._generate_combinatorial_cut_madani_no_pab(rejected_block_bids)
-        # elif prob is ProblemType.NoPrb:
-        #     self._generate_combinatorial_cut_madani_no_prb(accepted_block_bids)
         self._generate_gcuts(prob, accepted_block_bids, rejected_block_bids)
 
     def _generate_combinatorial_cut_martin(self, accepted_block_bids, rejected_block_bids):
