@@ -18,8 +18,18 @@ logger = logging.getLogger(__name__)
 
 class DamData:
 
-    def __init__(self):
-        self.dam_bids = None
+    _FIELD_NAME_2_DATA_TYPE = {
+        "bid_id": str,
+        "bucket_id": "int16",
+        "period": "int16",
+        "bid_type": str,
+        "zone": str,
+        "quantity": "float64",
+        "price": "float64",
+        "num_periods": "int16",
+        "link": str
+    }
+
     # minimum allowable bid price
     min_price = 0
     # maximum allowable bid price
@@ -28,6 +38,37 @@ class DamData:
     number_of_periods = 24
     # reading the dam input from the file specified
 
+    def __init__(self):
+        self.dam_bids = None
+
+    @staticmethod
+    def _create_idential_bid_lists(bids_df):
+        """Create the list of identical bid sets for different bid types
+        
+        NOTE: Currently, only block bids are checked."""
+        bid_type_2_identical_bid_lists = {}
+        block_bids_df = bids_df[(bids_df["bid_type"] == BidType.BLOCK.value) & (bids_df["link"].isnull())].reset_index(
+            drop=True)
+        bid_lists = []
+        for name, df_ in block_bids_df.groupby(by=["period", "num_periods", "quantity", "price"]):
+            if df_["bid_id"].count() == 1:
+                continue
+            sorted_df = df_.sort_values("bid_id")
+            identical_bids = []
+            for _, row in sorted_df.iterrows():
+                bid_type = row[dc.DAM_DATA_BID_TYPE_HEADER]
+                bid_id = row[dc.DAM_DATA_BID_ID_HEADER]
+                num_of_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
+                period = row[dc.DAM_DATA_BID_PERIOD_HEADER]
+                price = row[dc.DAM_DATA_BID_PRICE_HEADER]
+                quantity = row[dc.DAM_DATA_BID_QUANTITY_HEADER]
+                link = row[dc.DAM_DATA_BID_LINK_HEADER]
+                block_bid = BlockBid(bid_id, num_of_periods, period, price, quantity, link)
+                identical_bids.append(block_bid)
+            bid_lists.append(identical_bids)
+        bid_type_2_identical_bid_lists[BidType.BLOCK] = bid_lists
+        return bid_type_2_identical_bid_lists
+
     def read_input(self, file_path):
         """
         Reads input data in the specified path and create dam_bids object
@@ -35,16 +76,17 @@ class DamData:
         :return:
         """
         # read data as a data frame
-        data = pd.read_csv(file_path)
+        df = pd.read_csv(file_path, dtype=DamData._FIELD_NAME_2_DATA_TYPE)
+        df = df.iloc[:, 4:]
         # define bid maps
         bid_id_2_hourly_bid = {}
         bid_id_2_block_bid = {}
         bid_id_2_flexible_bid = {}
         # iterate data frame and create bid objects
-        for index, row in data.iterrows():
+        for index, row in df.iterrows():
 
             bid_type = row[dc.DAM_DATA_BID_TYPE_HEADER]
-            bid_id = str(row[dc.DAM_DATA_BID_ID_HEADER])
+            bid_id = row[dc.DAM_DATA_BID_ID_HEADER]
             num_of_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
             period = row[dc.DAM_DATA_BID_PERIOD_HEADER]
             price = row[dc.DAM_DATA_BID_PRICE_HEADER]
@@ -65,15 +107,23 @@ class DamData:
         # create simple bids from hourly bids
         for bid_id, hourly_bid in bid_id_2_hourly_bid.items():
             hourly_bid.step_id_2_simple_bid = du.create_simple_bids_from_hourly_bid(hourly_bid)
-        self.dam_bids = DamBids(bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid)
+        # create the identical bid lists
+        bid_type_2_identical_bid_lists = DamData._create_idential_bid_lists(df)
+        
+        self.dam_bids = DamBids(
+            bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid, 
+            bid_type_2_identical_bid_lists=bid_type_2_identical_bid_lists)
 
 
 class DamBids:
 
-    def __init__(self, bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid):
+    def __init__(
+            self, bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid, 
+            bid_type_2_identical_bid_lists=None):
         self.bid_id_2_hourly_bid = bid_id_2_hourly_bid
         self.bid_id_2_block_bid = bid_id_2_block_bid
         self.bid_id_2_flexible_bid = bid_id_2_flexible_bid
+        self.bid_type_2_identical_bid_lists = bid_type_2_identical_bid_lists or {}
 
 
 class Bid(object):

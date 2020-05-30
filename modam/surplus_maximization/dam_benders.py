@@ -11,6 +11,7 @@ from modam.surplus_maximization.dam_common import BendersDecompositionStats, Dam
     OptimizationStats, OptimizationStatus, ProblemType, SolutionApproach, Solver, SolverParameters
 import modam.surplus_maximization.dam_constants as dc
 from modam.surplus_maximization.dam_exceptions import UnsupportedProblemException
+from modam.surplus_maximization.dam_input import BidType
 import modam.surplus_maximization.dam_utils as du
 
 
@@ -150,7 +151,9 @@ class BendersDecompositionGurobi(BendersDecomposition):
         master_prob.set_params(self.solver_params)
 
         # create sub problem
-        self.sub_problem = SubProblemGurobi(master_prob, self._working_dir)
+        sub_prob = MasterProblemGurobi(self.dam_data, self._working_dir)
+        sub_prob.create_model()
+        self.sub_problem = SubProblemGurobi(sub_prob.model.relax(), self._working_dir)
         sub_prob = self.sub_problem
 
         # pass data into callback
@@ -175,7 +178,9 @@ class BendersDecompositionGurobi(BendersDecomposition):
         master_prob.set_params(self.solver_params)
 
         # create sub problem
-        self.sub_problem = SubProblemGurobi(master_prob, self._working_dir)
+        sub_prob = MasterProblemGurobi(self.dam_data, self._working_dir)
+        sub_prob.create_model()
+        self.sub_problem = SubProblemGurobi(sub_prob.model.relax(), self._working_dir)
         sub_prob = self.sub_problem
 
         # pass data into callback
@@ -290,6 +295,22 @@ class MasterProblemGurobi(MasterProblem):
             constraint = self.model.addConstr(expr, grb.GRB.EQUAL, 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
 
+    def _create_cuts_for_identical_bids(self):
+        """Sets a complete ordering for the acceptance of identical bid sets
+        
+        NOTE: Implemented only for block bids"""
+        block_bid_lists = self.dam_data.dam_bids.bid_type_2_identical_bid_lists.get(BidType.BLOCK, [])
+        model = self.model
+        for block_bids in block_bid_lists:
+            for index, block_bid in enumerate(block_bids):
+                if index == len(block_bids) - 1:
+                    continue
+                bid_id = block_bid.bid_id
+                bid_id_ = block_bids[index + 1].bid_id
+                y = self.bid_id_2_bbidvar[bid_id]
+                y_ = self.bid_id_2_bbidvar[bid_id_]
+                model.addConstr(y_ - y, grb.GRB.LESS_EQUAL, 0, "identical_bid_ordering_" + bid_id + "_" + bid_id_)
+
     def create_model(self):
         # create decision variables
         self._create_hbidvars()
@@ -298,6 +319,9 @@ class MasterProblemGurobi(MasterProblem):
         self._create_obj_function()
         # create constraint set
         self._create_balance_constraints()
+        # create identical bid cuts
+        self._create_cuts_for_identical_bids()
+        self.model.update()
 
     def write_model(self):
         # write model
@@ -330,36 +354,39 @@ class MasterProblemGurobi(MasterProblem):
 
 class SubProblemGurobi(SubProblem):
 
-    def __init__(self, master_problem, working_dir):
+    def __init__(self, model, working_dir):
         SubProblem.__init__(self, working_dir)
-        self.model = master_problem.model.copy().relax()
+        self.model = model
         self.objval = None
+        self.set_params()
 
     def reset_block_bid_bounds(self, bid_id_2_bbidvar):
         for bid_id in bid_id_2_bbidvar.keys():
-            var = self.model.getVarByName('y_' + str(bid_id))
+            var = self.model.getVarByName('y_' + bid_id)
             var.lb = 0.0
             var.ub = 1.0
 
     def restrict_rejected_block_bids(self, rejected_block_bids):
         # restrict the model
         for bid_id in rejected_block_bids:
-            var = self.model.getVarByName('y_' + str(bid_id))
+            var = self.model.getVarByName('y_' + bid_id)
             var.ub = 0.0
 
     def restrict_accepted_block_bids(self, accepted_block_bids):
         # restrict the model
         for bid_id in accepted_block_bids:
-            var = self.model.getVarByName('y_' + str(bid_id))
+            var = self.model.getVarByName('y_' + bid_id)
             var.lb = 1.0
+
+    def set_params(self):
+        # set parameters
+        self.model.Params.OutputFlag = 0
 
     def write_model(self):
         # write model
         self.model.write(os.path.join(self._working_dir, 'sub.lp'))
 
     def solve_model(self):
-        # set parameters
-        self.model.Params.OutputFlag = 0
         # solve model
         self.model.optimize()
         self.objval = self.model.ObjVal
@@ -394,7 +421,8 @@ class CallbackGurobi:
             model._sp.solve_model()
             model._num_of_subproblems += 1
             # assess if the current node solution is valid
-            if model._sp.objval > node_obj + dc.OBJ_COMP_TOL:
+            sub_problem_obj = model._sp.objval
+            if sub_problem_obj > node_obj + dc.OBJ_COMP_TOL:
                 # add lazy constraint to cut this solution
                 CallbackGurobi._generate_lazy_cuts(
                     model, accepted_block_bids, rejected_block_bids, model._bid_id_2_bbidvar)
@@ -627,6 +655,24 @@ class MasterProblemCplex(MasterProblem):
         self.model.linear_constraints.add(lin_expr=con_expr, senses=senses, rhs=rhs, names=con_names)
         self.period_2_balance_con = con_names
 
+    def _create_cuts_for_identical_bids(self):
+        """Sets a complete ordering for the acceptance of identical bid sets
+        
+        NOTE: Implemented only for block bids"""
+        block_bid_lists = self.dam_data.dam_bids.bid_type_2_identical_bid_lists.get(BidType.BLOCK, [])
+        model = self.model
+        for block_bids in block_bid_lists:
+            for index, block_bid in enumerate(block_bids):
+                if index == len(block_bids) - 1:
+                    continue
+                bid_id = block_bid.bid_id
+                bid_id_ = block_bids[index + 1].bid_id
+                y = model.variables.get_indices(self.bid_id_2_bbidvar[bid_id])
+                y_ = model.variables.get_indices(self.bid_id_2_bbidvar[bid_id_])
+                expr = cpx.SparsePair(ind=[y, y_], val=[-1, 1])
+                name = "identical_bid_ordering_" + bid_id + "_" + bid_id_
+                model.linear_constraints.add(lin_expr=[expr], senses=["L"], rhs=[0], names=[name])
+
     def create_model(self):
         # create decision variables
         self._create_hbidvars()
@@ -635,6 +681,8 @@ class MasterProblemCplex(MasterProblem):
         self._create_obj_function()
         # create constraint set
         self._create_balance_constraints()
+        # create identical bid constraints
+        self._create_cuts_for_identical_bids()
         # create name_2_ind dictionary
         self.name_2_ind = {n: j for j, n in enumerate(self.model.variables.get_names())}
 
@@ -1035,6 +1083,22 @@ class MasterProblemScip(MasterProblem):
                 scip.quicksum(var * coeff for var, coeff in zip(variables, coeffs)) == 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
 
+    def _create_cuts_for_identical_bids(self):
+        """Sets a complete ordering for the acceptance of identical bid sets
+        
+        NOTE: Implemented only for block bids"""
+        block_bid_lists = self.dam_data.dam_bids.bid_type_2_identical_bid_lists.get(BidType.BLOCK, [])
+        model = self.model
+        for block_bids in block_bid_lists:
+            for index, block_bid in enumerate(block_bids):
+                if index == len(block_bids) - 1:
+                    continue
+                bid_id = block_bid.bid_id
+                bid_id_ = block_bids[index + 1].bid_id
+                y = self.bid_id_2_bbidvar[bid_id]
+                y_ = self.bid_id_2_bbidvar[bid_id_]
+                model.addCons(y_ - y <= 0, "identical_bid_ordering_" + bid_id + "_" + bid_id_)
+
     def create_model(self):
         # create decision variables
         self._create_hbidvars()
@@ -1043,6 +1107,7 @@ class MasterProblemScip(MasterProblem):
         self._create_obj_function()
         # create constraint set
         self._create_balance_constraints()
+        self._create_cuts_for_identical_bids()
 
     def write_model(self):
         # write model
