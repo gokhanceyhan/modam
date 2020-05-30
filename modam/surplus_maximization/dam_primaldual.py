@@ -7,6 +7,7 @@ from pyscipopt import Model
 
 from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
     ProblemType
+from modam.surplus_maximization.dam_input import BidType
 from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss, \
     calculate_bigm_for_block_bid_missed_surplus
 
@@ -47,6 +48,7 @@ class PrimalDualModel:
         self._create_dual_feasibility_constraints()
         self._restrict_loss_variables()
         self._create_strong_duality_constraint()
+        self._create_cuts_for_identical_bids()
 
     def _create_hbidvars(self):
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
@@ -170,6 +172,22 @@ class PrimalDualModel:
             lin_expr.add(y, block_bid.num_period * block_bid.price * block_bid.quantity)
             lin_expr.addTerms([-1, 1], [s, l])
         model.addConstr(lin_expr, grb.GRB.GREATER_EQUAL, 0.0, 'sd')
+
+    def _create_cuts_for_identical_bids(self):
+        """Sets a complete ordering for the acceptance of identical bid sets
+        
+        NOTE: Implemented only for block bids"""
+        block_bid_lists = self.dam_data.dam_bids.bid_type_2_identical_bid_lists.get(BidType.BLOCK, [])
+        model = self.model
+        for block_bids in block_bid_lists:
+            for index, block_bid in enumerate(block_bids):
+                if index == len(block_bids) - 1:
+                    continue
+                bid_id = block_bid.bid_id
+                bid_id_ = block_bids[index + 1].bid_id
+                y = self.bid_id_2_bbidvar[bid_id][0]
+                y_ = self.bid_id_2_bbidvar[bid_id_][0]
+                model.addConstr(y_ - y, grb.GRB.LESS_EQUAL, 0, "identical_bid_ordering_" + bid_id + "_" + bid_id_)
 
 
 class PrimalDualSolver(object):
