@@ -70,13 +70,13 @@ class SurplusMaximizationSolverExecutorApp:
             "-g", "--mip-rel-gap", default=1e-6, 
             help="set the MIP relative gap tolerance in the surplus maximization solver")
         parser.add_argument(
-            "--method", 
+            "-m", "--method", 
             choices=[
                 SolutionApproach.Benders.value, SolutionApproach.BranchAndBound.value, 
                 SolutionApproach.PrimalDual.value], 
             help="sets the method to use to solve the surplus maximiation problem")
         parser.add_argument(
-            "--num-threads", default=1, help="set the number of threads in the surplus maximization MIP solver")
+            "-n", "--num-threads", default=1, help="set the number of threads in the surplus maximization MIP solver")
         parser.add_argument(
             "-p", "--problem-type", 
             choices=[ProblemType.NoPab.value, ProblemType.NoPrb.value, ProblemType.Unrestricted.value], 

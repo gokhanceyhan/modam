@@ -77,8 +77,18 @@ def is_rejected_block_bid_prb(bid, mcp):
             return False
 
 
-def calculate_bigm_for_block_bid_loss(block_bid):
-    return abs(block_bid.price * block_bid.quantity)
+def calculate_bigm_for_block_bid_loss(block_bid, max_price=2000, min_price=0):
+    if block_bid.is_supply:
+        return abs((block_bid.price - min_price) * block_bid.quantity * block_bid.num_period)
+    # if demand
+    return abs((max_price - block_bid.price) * block_bid.quantity * block_bid.num_period)
+
+
+def calculate_bigm_for_block_bid_missed_surplus(block_bid, max_price=2000, min_price=0):
+    if block_bid.is_supply:
+        return abs((max_price - block_bid.price) * block_bid.quantity * block_bid.num_period)
+    # if demand
+    return abs((block_bid.price - min_price) * block_bid.quantity * block_bid.num_period)
 
 
 def do_block_bids_have_common_period(this_block_bid, that_block_bid):

@@ -7,7 +7,8 @@ from pyscipopt import Model
 
 from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
     ProblemType
-from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss
+from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss, \
+    calculate_bigm_for_block_bid_missed_surplus
 
 
 class PrimalDualModel:
@@ -140,10 +141,13 @@ class PrimalDualModel:
             mexpr = grb.LinExpr(0.0)
             lexpr = grb.LinExpr(0.0)
             y, s, l, m = bid_id_2_bbidvar[bid_id]
-            bigm = calculate_bigm_for_block_bid_loss(block_bid)
-            mexpr.addTerms([1, bigm], [m, y])
-            lexpr.addTerms([1, -bigm], [l, y])
-            model.addConstr(mexpr, grb.GRB.LESS_EQUAL, bigm, 'missed_surplus_' + str(bid_id))
+            l_bigm = calculate_bigm_for_block_bid_loss(
+                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+            m_bigm = calculate_bigm_for_block_bid_missed_surplus(
+                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+            mexpr.addTerms([1, m_bigm], [m, y])
+            lexpr.addTerms([1, -l_bigm], [l, y])
+            model.addConstr(mexpr, grb.GRB.LESS_EQUAL, m_bigm, 'missed_surplus_' + str(bid_id))
             model.addConstr(lexpr, grb.GRB.LESS_EQUAL, 0.0, 'loss_surplus_' + str(bid_id))
             self.loss_expr.add(l)
             self.missed_surplus_expr.add(m)
