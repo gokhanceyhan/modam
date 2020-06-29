@@ -7,6 +7,7 @@ Created on Thu Aug  2 21:07:42 2018
 from abc import abstractmethod
 from enum import Enum
 import logging
+import numpy as np
 import pandas as pd
 
 import modam.surplus_maximization.dam_constants as dc
@@ -206,9 +207,21 @@ class BidType(Enum):
 class InputStats:
 
     def __init__(self, dam_data):
+        self._average_block_bid_num_period = np.mean(
+            [block_bid.num_period for block_bid in dam_data.dam_bids.bid_id_2_block_bid.values()])
+        self._average_block_bid_quantity = np.mean(
+            [abs(block_bid.quantity) for block_bid in dam_data.dam_bids.bid_id_2_block_bid.values()])
         self._number_of_hourly_bids = len(dam_data.dam_bids.bid_id_2_hourly_bid)
         self._number_of_block_bids = len(dam_data.dam_bids.bid_id_2_block_bid)
         self._number_of_flexible_bids = len(dam_data.dam_bids.bid_id_2_flexible_bid)
+    
+    def average_block_bid_num_period(self):
+        """Returns the average block bid number of periods"""
+        return self._average_block_bid_num_period
+
+    def average_block_bid_quantity(self):
+        """Returns the average block bid quantity"""
+        return self._average_block_bid_quantity
 
     def number_of_hourly_bids(self):
         """Returns the number of hourly bids"""

@@ -220,6 +220,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
         dam_soln.market_clearing_prices = mp.fixed.getAttr('Pi', mp.period_2_balance_con.values())
+        dam_soln = du.generate_market_result_statistics(self.dam_data.dam_bids, dam_soln)
         return dam_soln
 
     def _get_solver_output(self):
@@ -568,6 +569,7 @@ class BendersDecompositionCplex(BendersDecomposition):
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
         dam_soln.market_clearing_prices = solution.get_dual_values(mp.period_2_balance_con)
+        dam_soln = du.generate_market_result_statistics(self.dam_data.dam_bids, dam_soln)
         return dam_soln
 
     def _get_solver_output(self, elapsed_time):
@@ -992,6 +994,7 @@ class BendersDecompositionScip(BendersDecomposition):
         grb_master_problem.solve_fixed_model()
         dam_soln.market_clearing_prices = grb_master_problem.fixed.getAttr(
             'Pi', grb_master_problem.period_2_balance_con.values())
+        dam_soln = du.generate_market_result_statistics(self.dam_data.dam_bids, dam_soln)
         return dam_soln
 
     def _get_solver_output(self):

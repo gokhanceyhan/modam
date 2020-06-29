@@ -24,12 +24,37 @@ class BendersDecompositionStats(object):
 
 class DamSolution:
 
-    def __init__(self):
-        self.total_surplus = -1
+    def __init__(
+            self, 
+            average_pab_price_gap=None, 
+            average_prb_price_gap=None,
+            loss=0, 
+            max_pab_price_gap=None, 
+            max_prb_price_gap=None, 
+            missed_surplus=0, 
+            num_pab=0,
+            num_periods_for_pab_with_max_price_gap=None,
+            num_periods_for_prb_with_max_price_gap=None,
+            num_prb=0,
+            quantity_pab_with_max_price_gap=None, 
+            quantity_prb_with_max_price_gap=None):
         self.accepted_block_bids = []
-        self.rejected_block_bids = []
-        self.market_clearing_prices = []
+        self.average_pab_price_gap = average_pab_price_gap
+        self.average_prb_price_gap = average_prb_price_gap
         self.is_valid = False
+        self.loss = loss
+        self.market_clearing_prices = []
+        self.max_pab_price_gap = max_pab_price_gap
+        self.max_prb_price_gap = max_prb_price_gap
+        self.missed_surplus = missed_surplus
+        self.num_pab = num_pab
+        self.num_periods_for_pab_with_max_price_gap = num_periods_for_pab_with_max_price_gap
+        self.num_periods_for_prb_with_max_price_gap = num_periods_for_prb_with_max_price_gap
+        self.num_prb = num_prb
+        self.quantity_pab_with_max_price_gap = quantity_pab_with_max_price_gap
+        self.quantity_prb_with_max_price_gap = quantity_prb_with_max_price_gap
+        self.rejected_block_bids = []
+        self.total_surplus = None
 
     def _verify_no_pab(self, dam_bids):
         self.is_valid = True
