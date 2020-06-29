@@ -113,10 +113,7 @@ class SurplusMaximizationSolverExecutorApp:
         executor = SurplusMaximizationSolverExecutor(
             method=method, num_threads=num_threads, problem=problem, relative_gap_tolerance=relative_gap_tolerance, 
             solver=solver, time_limit_in_seconds=time_limit, working_dir=working_dir)
-        if run_mode == ExecutorRunMode.SINGLE:
-            executor.execute(data_file_path)
-        else:
-            executor.batch_execute(data_files)
+        executor.execute(data_files)
 
 
 class MultiObjectiveSolverExecutor:
@@ -153,7 +150,7 @@ class SurplusMaximizationSolverExecutor:
         self._time_limit_in_seconds = time_limit_in_seconds
         self._working_dir = working_dir
     
-    def batch_execute(self, file_names):
+    def execute(self, file_names):
         """Executes the surplus maximization solver in batch for the given problem data files"""
         batch_runner = BatchRunner(
             file_names, self._problem, self._solver, self._method, self._time_limit_in_seconds, 
@@ -162,19 +159,3 @@ class SurplusMaximizationSolverExecutor:
         runners = batch_runner.runners()
         write_runners_to_file(runners, self._working_dir)
         logger.info('Runs have been completed!')
-
-    def execute(self, file_name):
-        """Executes the surplus maximization solver for the given problem data file"""
-        runner = DamRunner(
-            file_name, problem_type=self._problem, solver=self._solver, method=self._method, 
-            time_limit=self._time_limit_in_seconds, relative_gap_tolerance=self._relative_gap_tolerance, 
-            num_threads=self._num_threads, working_dir=self._working_dir)
-        runner.run()
-        if runner.output().optimization_stats().number_of_solutions() == 0:
-            logger.info('Failed to find a solution')
-            return
-        solution = runner.output().dam_solution()
-        if solution.is_valid:
-            logger.info('Successfully found a solution!')
-        else:
-            logger.info('Failed to find a valid solution')
