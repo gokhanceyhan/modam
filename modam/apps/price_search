@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+
+"""Runs the price search"""
+
+from modam.surplus_maximization.dam_price_search import PriceSearchApp
+
+PriceSearchApp().run()

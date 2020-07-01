@@ -244,7 +244,6 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
         dam_soln.market_clearing_prices = [x.X for x in self.model.getVars() if x.VarName.find('pi') != -1]
-        dam_soln = du.generate_market_result_statistics(self.dam_data.dam_bids, dam_soln)
         return dam_soln
 
     def _get_solver_output(self):
