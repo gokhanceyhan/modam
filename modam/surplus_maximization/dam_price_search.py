@@ -214,8 +214,6 @@ class PriceSearchGurobiModel:
         model.setObjectiveN(self._surplus_expr, 0, priority=2, name="hourly_bid_surplus")
         model.setObjectiveN(-1 * self._price_expression, 1, priority=1, name="price_sum")
         model.optimize()
-        # self._model.write(os.path.join(self._working_dir, self._prob_name + '_maxp.lp'))
-        # self._model.write(os.path.join(self._working_dir, self._prob_name + '_maxp.sol'))
         return [price_var.x for price_var in self._price_vars]
 
     def minimize_prices(self):
@@ -227,8 +225,6 @@ class PriceSearchGurobiModel:
         model.setObjectiveN(self._surplus_expr, 0, priority=2, name="hourly_bid_surplus")
         model.setObjectiveN(self._price_expression, 1, priority=1, name="price_sum")
         model.optimize()
-        # self._model.write(os.path.join(self._working_dir, self._prob_name + '_minp.lp'))
-        # self._model.write(os.path.join(self._working_dir, self._prob_name + '_minp.sol'))
         return [price_var.x for price_var in self._price_vars]
 
     def update_model(self, block_bid_id_2_value=None):
