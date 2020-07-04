@@ -4,6 +4,7 @@ import logging
 
 from modam.surplus_maximization.dam_common import Solver, SolverParameters
 from modam.surplus_maximization.dam_input import DamData, InputStats
+from modam.surplus_maximization.dam_preprocessor import Preprocessor
 from modam.surplus_maximization.dam_solver import DamSolverCplex, DamSolverGurobi, DamSolverScip
 
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +71,9 @@ class DamRunner(object):
         dam_data.read_input(self._input_file_name)
         # create input data stats
         self._input_stats = InputStats(dam_data)
+        # run pre-processor
+        preprocessor = Preprocessor(dam_data, self._working_dir)
+        dam_data = preprocessor.run()
         # solve problem
         params = SolverParameters(
             time_limit=self._time_limit, rel_gap=self._relative_gap_tolerance, num_threads=self._num_threads)

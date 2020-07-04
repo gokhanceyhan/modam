@@ -6,6 +6,7 @@ import gurobipy as grb
 
 from modam.surplus_maximization.dam_common import ProblemType
 from modam.surplus_maximization.dam_input import DamData
+from modam.surplus_maximization.dam_preprocessor import Preprocessor as dam_data_preprocessor
 from modam.surplus_maximization.dam_primaldual import PrimalDualModel
 
 
@@ -23,6 +24,8 @@ class Preprocessor:
         """Creates and returns the model files for the given data files"""
         dam_data = DamData()
         dam_data.read_input(data_file)
+        # run the dam data pre-processor
+        dam_data = dam_data_preprocessor(dam_data, self._working_dir).run()
         pd_model = PrimalDualModel(ProblemType.Unrestricted, dam_data, 'e-smilp', self._working_dir)
         pd_model.create_model()
         model = pd_model.model

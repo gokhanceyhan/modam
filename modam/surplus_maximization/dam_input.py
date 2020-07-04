@@ -164,6 +164,10 @@ class HourlyBid(Bid):
         """
         self.price_quantity_pairs.append((price, quantity))
 
+    def set_price_quantity_pairs(self, price_and_quantities):
+        """Sets the price-quantity pairs"""
+        self.price_quantity_pairs = price_and_quantities
+
     def print_bid(self):
         pass
 

@@ -15,12 +15,13 @@ class NondominatedsetSolver:
         """Solves the problems in the model files and save the output to the working directory"""
         obj_index_2_range = {
             0: (0, 1e10),
-            1: (-1e10, 0),
-            2: (-1e10, 0)
+            1: (-1e9, 0),
+            2: (-1e9, 0)
         }
         executor = Executor(
-            self._model_files, discrete_objective_indices=[0], explore_decision_space=False, 
-            obj_index_2_range=obj_index_2_range, search_model_params_file=self._mip_params_file, 
-            slice_model_params_file=self._lp_params_file, write_integer_vectors=True)
+            self._model_files, dichotomic_search_rel_tol=1e-5, discrete_objective_indices=[0], 
+            explore_decision_space=False, obj_index_2_range=obj_index_2_range, 
+            search_model_params_file=self._mip_params_file, slice_model_params_file=self._lp_params_file, 
+            write_integer_vectors=True, max_num_iterations=100)
         executor.execute(self._working_dir)
 
