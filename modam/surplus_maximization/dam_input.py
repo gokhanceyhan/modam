@@ -110,7 +110,6 @@ class DamData:
             hourly_bid.step_id_2_simple_bid = du.create_simple_bids_from_hourly_bid(hourly_bid)
         # create the identical bid lists
         bid_type_2_identical_bid_lists = DamData._create_idential_bid_lists(df)
-        
         self.dam_bids = DamBids(
             bid_id_2_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid, 
             bid_type_2_identical_bid_lists=bid_type_2_identical_bid_lists)

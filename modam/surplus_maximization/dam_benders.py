@@ -12,6 +12,7 @@ from modam.surplus_maximization.dam_common import BendersDecompositionStats, Dam
 import modam.surplus_maximization.dam_constants as dc
 from modam.surplus_maximization.dam_exceptions import UnsupportedProblemException
 from modam.surplus_maximization.dam_input import BidType
+from modam.surplus_maximization.dam_post_problem import PostProblemGurobiModel
 import modam.surplus_maximization.dam_utils as du
 
 
@@ -208,18 +209,28 @@ class BendersDecompositionGurobi(BendersDecomposition):
         master_prob.solve_model()
         return self._get_solver_output()
 
-    def _get_best_solution(self):
+    def _get_best_solution(self, use_post_processing_problem=False):
         # fill solution
         mp = self.master_problem
         dam_soln = DamSolution()
         dam_soln.total_surplus = mp.fixed.ObjVal
         y = mp.fixed.getAttr('X', mp.bid_id_2_bbidvar)
+        block_bid_id_2_value = {}
         for bid_id, value in y.items():
             if abs(value - 0.0) <= mp.fixed.Params.IntFeasTol:
                 dam_soln.rejected_block_bids.append(bid_id)
+                block_bid_id_2_value[bid_id] = 0
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
-        dam_soln.market_clearing_prices = mp.fixed.getAttr('Pi', mp.period_2_balance_con.values())
+                block_bid_id_2_value[bid_id] = 1
+        post_problem_result = None
+        if use_post_processing_problem:
+            post_problem = PostProblemGurobiModel(self.dam_data, self._working_dir)
+            post_problem_result = post_problem.solve(block_bid_id_2_value=block_bid_id_2_value)
+        if post_problem_result:
+            dam_soln.market_clearing_prices = post_problem_result.prices()
+        else:
+            dam_soln.market_clearing_prices = mp.fixed.getAttr('Pi', mp.period_2_balance_con.values())
         dam_soln = du.generate_market_result_statistics(self.dam_data.dam_bids, dam_soln)
         return dam_soln
 

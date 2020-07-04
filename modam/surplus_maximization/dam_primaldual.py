@@ -136,24 +136,6 @@ class PrimalDualModel:
             expr.addTerms(q, pi)
             model.addConstr(expr, grb.GRB.GREATER_EQUAL, rhs, 'dual_' + str(bid_id))
 
-    def _restrict_loss_variables(self):
-        bid_id_2_bbidvar = self.bid_id_2_bbidvar
-        model = self.model
-        for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
-            mexpr = grb.LinExpr(0.0)
-            lexpr = grb.LinExpr(0.0)
-            y, s, l, m = bid_id_2_bbidvar[bid_id]
-            l_bigm = calculate_bigm_for_block_bid_loss(
-                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
-            m_bigm = calculate_bigm_for_block_bid_missed_surplus(
-                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
-            mexpr.addTerms([1, m_bigm], [m, y])
-            lexpr.addTerms([1, -l_bigm], [l, y])
-            model.addConstr(mexpr, grb.GRB.LESS_EQUAL, m_bigm, 'missed_surplus_' + str(bid_id))
-            model.addConstr(lexpr, grb.GRB.LESS_EQUAL, 0.0, 'loss_surplus_' + str(bid_id))
-            self.loss_expr.add(l)
-            self.missed_surplus_expr.add(m)
-
     def _create_strong_duality_constraint(self):
         bid_id_2_step_id_2_sbidvar = self.bid_id_2_step_id_2_sbidvar
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
@@ -188,6 +170,24 @@ class PrimalDualModel:
                 y = self.bid_id_2_bbidvar[bid_id][0]
                 y_ = self.bid_id_2_bbidvar[bid_id_][0]
                 model.addConstr(y_ - y, grb.GRB.LESS_EQUAL, 0, "identical_bid_ordering_" + bid_id + "_" + bid_id_)
+
+    def _restrict_loss_variables(self):
+        bid_id_2_bbidvar = self.bid_id_2_bbidvar
+        model = self.model
+        for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
+            mexpr = grb.LinExpr(0.0)
+            lexpr = grb.LinExpr(0.0)
+            y, s, l, m = bid_id_2_bbidvar[bid_id]
+            l_bigm = calculate_bigm_for_block_bid_loss(
+                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+            m_bigm = calculate_bigm_for_block_bid_missed_surplus(
+                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+            mexpr.addTerms([1, m_bigm], [m, y])
+            lexpr.addTerms([1, -l_bigm], [l, y])
+            model.addConstr(mexpr, grb.GRB.LESS_EQUAL, m_bigm, 'missed_surplus_' + str(bid_id))
+            model.addConstr(lexpr, grb.GRB.LESS_EQUAL, 0.0, 'loss_surplus_' + str(bid_id))
+            self.loss_expr.add(l)
+            self.missed_surplus_expr.add(m)
 
 
 class PrimalDualSolver(object):
