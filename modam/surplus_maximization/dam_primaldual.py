@@ -235,7 +235,7 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         # fill solution
         dam_soln = DamSolution()
         dam_soln.total_surplus = -1 * self.model.ObjVal
-        varname_2_bbidvar = {x.VarName: x for x in self.model.getVars() if x.VarName.find('y') != -1}
+        varname_2_bbidvar = {x.VarName: x for x in self.model.getVars() if x.VarName.find('y_') == 0}
         y = self.model.getAttr('X', varname_2_bbidvar)
         for name, value in y.items():
             bid_id = name[2:]
@@ -243,7 +243,7 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
                 dam_soln.rejected_block_bids.append(bid_id)
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
-        dam_soln.market_clearing_prices = [x.X for x in self.model.getVars() if x.VarName.find('pi') != -1]
+        dam_soln.market_clearing_prices = [x.X for x in self.model.getVars() if x.VarName.find('pi_') == 0]
         return dam_soln
 
     def _get_solver_output(self):
@@ -294,7 +294,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         # fill dam solution object
         dam_soln = DamSolution()
         dam_soln.total_surplus = -1 * solution.get_objective_value()
-        bbid_varnames = [name for name in self.model.variables.get_names() if name.find('y') != -1]
+        bbid_varnames = [name for name in self.model.variables.get_names() if name.find('y_') == 0]
         varname_2_y = {name: solution.get_values(name) for name in bbid_varnames}
         for name, y in varname_2_y.items():
             bid_id = name[2:]
@@ -302,7 +302,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
                 dam_soln.rejected_block_bids.append(bid_id)
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
-        pi_varnames = [name for name in self.model.variables.get_names() if name.find('pi') != -1]
+        pi_varnames = [name for name in self.model.variables.get_names() if name.find('pi_') == 0]
         pi = solution.get_values(pi_varnames)
         dam_soln.market_clearing_prices = pi
         return dam_soln
@@ -351,7 +351,7 @@ class PrimalDualScipSolver(PrimalDualSolver):
         # fill dam solution object
         dam_soln = DamSolution()
         dam_soln.total_surplus = -1 * model.getObjVal()
-        varname_2_bbidvar = {x.name: x for x in model.getVars() if x.name.find('y') != -1}
+        varname_2_bbidvar = {x.name: x for x in model.getVars() if x.name.find('y_') == 0}
         varname_2_y = {name: model.getVal(var) for name, var in varname_2_bbidvar.items()}
         for name, value in varname_2_y.items():
             bid_id = name[2:]
@@ -359,7 +359,7 @@ class PrimalDualScipSolver(PrimalDualSolver):
                 dam_soln.rejected_block_bids.append(bid_id)
             else:
                 dam_soln.accepted_block_bids.append(bid_id)
-        dam_soln.market_clearing_prices = [model.getVal(x) for x in model.getVars() if x.name.find('pi') != -1]
+        dam_soln.market_clearing_prices = [model.getVal(x) for x in model.getVars() if x.name.find('pi_') == 0]
         return dam_soln
 
     def _get_solver_output(self):
