@@ -1154,7 +1154,8 @@ class MasterProblemScip(MasterProblem):
 
         self.model.data = callback_data
         self.model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
-        self.model.setBoolParam("misc/allowdualreds", 0)
+        self.model.setBoolParam("misc/allowstrongdualreds", 0)
+        self.model.setBoolParam("misc/allowweakdualreds", 0)
         self.model.optimize()
 
     def solve_fixed_model(self):

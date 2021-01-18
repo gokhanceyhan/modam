@@ -8,6 +8,6 @@
 *.prm
 *.sol
 venv/
-damvenv/
+modam_venv/
 .idea/
 .vscode/
