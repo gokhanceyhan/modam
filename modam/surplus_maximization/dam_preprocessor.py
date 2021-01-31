@@ -5,7 +5,7 @@ from collections import namedtuple
 import os
 import pandas as pd
 
-from modam.surplus_maximization.dam_input import HourlyBid
+from modam.surplus_maximization.dam_input import SimpleBid, StepHourlyBid
 
 
 class Preprocessor:
@@ -18,16 +18,16 @@ class Preprocessor:
         self._dam_data = dam_data
         self._working_dir = working_dir
 
-    def _create_aggregate_hourly_bids(self, approximate=False):
-        """Creates aggregate supply and demand hourly bids for each period"""
-        bid_id_2_hourly_bid = self._dam_data.dam_bids.bid_id_2_hourly_bid
-        simple_bids = []
+    def _create_aggregate_hourly_bids_from_step_hourly_bids(self, approximate=False):
+        """Creates aggregate supply and demand hourly bids for each period from step hourly bids"""
+        bid_id_2_hourly_bid = self._dam_data.dam_bids.bid_id_2_step_hourly_bid
+        records = []
         for bid_id, hourly_bid in bid_id_2_hourly_bid.items():
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
-                simple_bids.append(Preprocessor.SimpleBid(p=simple_bid[0], q=simple_bid[1], t=hourly_bid.period))
-        if not simple_bids:
+                records.append({'p': simple_bid.p, 'q': simple_bid.q, 't': hourly_bid.period})
+        if not records:
             return {}
-        hourly_bids_df = pd.DataFrame.from_records(simple_bids, columns=["p", "q", "t"])
+        hourly_bids_df = pd.DataFrame.from_records(records)
         # drop zero-quantity bids
         hourly_bids_df = hourly_bids_df[hourly_bids_df["q"] != 0.0]
         hourly_bids_df["d"] = hourly_bids_df["q"].apply(lambda x: "supply" if x < 0 else "demand")
@@ -38,9 +38,10 @@ class Preprocessor:
             aggr_hourly_bids_df = self._group_hourly_bids(aggr_hourly_bids_df)
         for (t, d), group in aggr_hourly_bids_df.groupby(["t", "d"]):
             bid_id = "{}_{}".format(t, d)
-            hourly_bid = HourlyBid(bid_id, 1, t, None, None)
+            hourly_bid = StepHourlyBid(bid_id, t)
             df_ = group.reset_index()
-            hourly_bid.step_id_2_simple_bid = {index + 1: (row["p"], row["q"]) for index, row in df_.iterrows()}
+            hourly_bid.step_id_2_simple_bid = {
+                index + 1: SimpleBid(p=row["p"], q=row["q"]) for index, row in df_.iterrows()}
             bid_id_2_aggregated_hourly_bid[bid_id] = hourly_bid
         return bid_id_2_aggregated_hourly_bid
 
@@ -55,6 +56,7 @@ class Preprocessor:
         """Runs the pre-preocessor and returns the preprocessed dam data"""
         dam_data = self._dam_data
         dam_bids = dam_data.dam_bids
-        bid_id_2_aggregated_hourly_bid = self._create_aggregate_hourly_bids(approximate=approximate)
-        dam_bids.bid_id_2_hourly_bid = bid_id_2_aggregated_hourly_bid
+        bid_id_2_aggregated_hourly_bid = self._create_aggregate_hourly_bids_from_step_hourly_bids(
+            approximate=approximate)
+        dam_bids.bid_id_2_step_hourly_bid = bid_id_2_aggregated_hourly_bid
         return dam_data

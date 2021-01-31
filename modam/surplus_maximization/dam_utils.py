@@ -7,42 +7,15 @@ import os
 import modam.surplus_maximization.dam_constants as dc
 
 
-def create_simple_bids_from_hourly_bid(hourly_bid):
-    step_id_2_simple_bid = {}
-    count = 1
-    prev_qnt = 0
-    if hourly_bid.price_quantity_pairs[0][1] <= 0:
-        # supply bid
-        for price, quantity in hourly_bid.price_quantity_pairs:
-            step_id_2_simple_bid[count] = (price, quantity - prev_qnt)
-            prev_qnt = quantity
-            count += 1
-    elif hourly_bid.price_quantity_pairs[len(hourly_bid.price_quantity_pairs)-1][1] >= 0:
-        # demand bid
-        for price, quantity in reversed(hourly_bid.price_quantity_pairs):
-            step_id_2_simple_bid[count] = (price, quantity - prev_qnt)
-            prev_qnt = quantity
-            count += 1
-    else:
-        prev_qnt = hourly_bid.price_quantity_pairs[0][1]
-        prev_prc = hourly_bid.price_quantity_pairs[0][0]
-        for price, quantity in hourly_bid.price_quantity_pairs[1:]:
-            if quantity >= 0:
-                # demand step
-                step_id_2_simple_bid[count] = (prev_prc, prev_qnt - quantity)
-                prev_prc = price
-            elif prev_qnt > 0:
-                # first supply step
-                step_id_2_simple_bid[count] = (prev_prc, prev_qnt)
-                count += 1
-                step_id_2_simple_bid[count] = (price, quantity)
-            else:
-                # supply step
-                step_id_2_simple_bid[count] = (price, quantity - prev_qnt)
-            prev_qnt = quantity
-            count += 1
-    return {step_id: simple_bid for step_id, simple_bid in step_id_2_simple_bid.items() if abs(simple_bid[1]) > 0}
-
+def interpolate(p_start, q_start, p_end, q_end, p=None, q=None):
+    assert p is not None or q is not None, "either 'p' or 'q' must be given to determine the interpolated point"
+    if p is not None:
+        assert p_start != p_end
+        w = (p - p_start) / (p_end - p_start)
+        return q_start + (q_end - q_start) * w
+    assert q_start != q_end
+    w = (q - q_start) / (q_end - q_start)
+    return p_start + (p_end - p_start) * w
 
 def is_accepted_block_bid_pab(bid, mcp):
     first = bid.period - 1
@@ -323,7 +296,8 @@ def write_runners_to_file(runners, working_dir):
     file_path = os.path.join(working_dir, "tests.csv")
     with open(file_path, mode='w') as csv_file:
         fieldnames = [
-            'problem file', 'problem type', 'solver', 'method', 'time limit', 'relative gap tolerance', 'hourly bids',
+            'problem file', 'problem type', 'solver', 'method', 'time limit', 'relative gap tolerance', 
+            'step hourly bids', 'piecewise hourly bids', 
             'block bids', 'flexible bids', 'valid', 'total surplus', 'solver status', 'best bound', 'relative gap',
             'elapsed solver time', 'number of solutions', 'number of nodes', 'number of subproblems', 
             'number of user cuts', 'avg block bid num period', 'avg block bid quantity', 'num accepted block bids', 
@@ -346,7 +320,8 @@ def write_runners_to_file(runners, working_dir):
                 'method': runner.method().value,
                 'time limit': runner.time_limit(),
                 'relative gap tolerance': runner.relative_gap_tolerance(),
-                'hourly bids': input_stats.number_of_hourly_bids(),
+                'step hourly bids': input_stats.number_of_step_hourly_bids(),
+                'piecewise hourly bids': input_stats.number_of_piecewise_hourly_bids(),
                 'block bids': input_stats.number_of_block_bids(),
                 'flexible bids': input_stats.number_of_flexible_bids(),
                 'valid': False if dam_solution is None else dam_solution.is_valid,

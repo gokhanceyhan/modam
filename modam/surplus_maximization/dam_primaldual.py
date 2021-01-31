@@ -7,7 +7,7 @@ from pyscipopt import Model
 
 from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
     ProblemType
-from modam.surplus_maximization.dam_input import BidType
+from modam.surplus_maximization.dam_input import BidType, DamData
 from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss, \
     calculate_bigm_for_block_bid_missed_surplus
 
@@ -51,7 +51,7 @@ class PrimalDualModel:
         self._create_cuts_for_identical_bids()
 
     def _create_hbidvars(self):
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             step_id_2_sbidvar = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
                 pvar = self.model.addVar(
@@ -74,18 +74,17 @@ class PrimalDualModel:
             self.bid_id_2_bbidvar[bid_id] = (pvar, dvar, lvar, mvar)
 
     def _create_price_variables(self):
-        for period in range(self.dam_data.number_of_periods):
+        for period in range(DamData.NUM_PERIODS):
             var = self.model.addVar(
-                vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=self.dam_data.min_price, 
-                ub=self.dam_data.max_price)
+                vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=DamData.MIN_PRICE, ub=DamData.MAX_PRICE)
             self.period_2_pi[period+1] = var
 
     def _create_obj_function(self):
         lin_expr = grb.LinExpr(0.0)
         # set coefficients for simple bids
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
-                lin_expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], step[0] * step[1])
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
+                lin_expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], simple_bid.p * simple_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             lin_expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.num_period * block_bid.price * block_bid.quantity)
@@ -94,13 +93,13 @@ class PrimalDualModel:
 
     def _create_balance_constraints(self):
         period_2_expr = {}
-        for period in range(1, self.dam_data.number_of_periods + 1, 1):
+        for period in range(1, DamData.NUM_PERIODS + 1, 1):
             expr = grb.LinExpr(0.0)
             period_2_expr[period] = expr
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 expr = period_2_expr[hourly_bid.period]
-                expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], step[1])
+                expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], simple_bid.q)
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 expr = period_2_expr[t]
@@ -114,13 +113,13 @@ class PrimalDualModel:
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         model = self.model
         period_2_pi = self.period_2_pi
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 expr = grb.LinExpr(0.0)
                 svar = bid_id_2_step_id_2_sbidvar[bid_id][step_id][1]
                 pi = period_2_pi[hourly_bid.period]
-                p = step[0]
-                q = step[1]
+                p = simple_bid.p
+                q = simple_bid.q
                 expr.addTerms([1, q], [svar, pi])
                 model.addConstr(expr, grb.GRB.GREATER_EQUAL, p*q, 'dual_' + str(bid_id) + '_' + str(step_id))
 
@@ -143,10 +142,10 @@ class PrimalDualModel:
 
         lin_expr = grb.LinExpr(0.0)
         # set coefficients for simple bids
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 pvar, dvar = bid_id_2_step_id_2_sbidvar[bid_id][step_id]
-                lin_expr.add(pvar, step[0] * step[1])
+                lin_expr.add(pvar, simple_bid.p * simple_bid.q)
                 lin_expr.add(dvar, -1)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
@@ -179,9 +178,9 @@ class PrimalDualModel:
             lexpr = grb.LinExpr(0.0)
             y, s, l, m = bid_id_2_bbidvar[bid_id]
             l_bigm = calculate_bigm_for_block_bid_loss(
-                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+                block_bid, max_price=DamData.MAX_PRICE, min_price=DamData.MIN_PRICE)
             m_bigm = calculate_bigm_for_block_bid_missed_surplus(
-                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+                block_bid, max_price=DamData.MAX_PRICE, min_price=DamData.MIN_PRICE)
             mexpr.addTerms([1, m_bigm], [m, y])
             lexpr.addTerms([1, -l_bigm], [l, y])
             model.addConstr(mexpr, grb.GRB.LESS_EQUAL, m_bigm, 'missed_surplus_' + str(bid_id))

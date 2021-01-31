@@ -11,7 +11,7 @@ from modam.surplus_maximization.dam_common import BendersDecompositionStats, Dam
     OptimizationStats, OptimizationStatus, ProblemType, SolutionApproach, Solver, SolverParameters
 import modam.surplus_maximization.dam_constants as dc
 from modam.surplus_maximization.dam_exceptions import UnsupportedProblemException
-from modam.surplus_maximization.dam_input import BidType
+from modam.surplus_maximization.dam_input import BidType, DamData
 from modam.surplus_maximization.dam_post_problem import PostProblemGurobiModel
 import modam.surplus_maximization.dam_utils as du
 
@@ -268,7 +268,7 @@ class MasterProblemGurobi(MasterProblem):
         self.model = grb.Model('master')
 
     def _create_hbidvars(self):
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             step_id_2_sbidvars = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
                 step_id_2_sbidvars[step_id] = self.model.addVar(
@@ -282,9 +282,9 @@ class MasterProblemGurobi(MasterProblem):
     def _create_obj_function(self):
         lin_expr = grb.LinExpr(0.0)
         # set coefficients for simple bids
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
-                lin_expr.add(self.bid_id_2_hbidvars[bid_id][step_id], step[0] * step[1])
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
+                lin_expr.add(self.bid_id_2_hbidvars[bid_id][step_id], simple_bid.p * simple_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             lin_expr.add(self.bid_id_2_bbidvar[bid_id], block_bid.num_period * block_bid.price * block_bid.quantity)
@@ -292,13 +292,13 @@ class MasterProblemGurobi(MasterProblem):
 
     def _create_balance_constraints(self):
         period_2_expr = {}
-        for period in range(1, self.dam_data.number_of_periods + 1, 1):
+        for period in range(1, DamData.NUM_PERIODS + 1, 1):
             expr = grb.LinExpr(0.0)
             period_2_expr[period] = expr
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 expr = period_2_expr[hourly_bid.period]
-                expr.add(self.bid_id_2_hbidvars[bid_id][step_id], step[1])
+                expr.add(self.bid_id_2_hbidvars[bid_id][step_id], simple_bid.q)
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 expr = period_2_expr[t]
@@ -494,7 +494,7 @@ class CallbackGurobi:
         # TODO: replace 'balance_' with a defined constant
         balance_constraints = [
             sp.model.getConstrByName('balance_' + str(period)) for period in 
-            range(1, dam_data.number_of_periods + 1, 1)]
+            range(1, DamData.NUM_PERIODS + 1, 1)]
         market_clearing_prices = sp.model.getAttr('Pi', balance_constraints)
         return market_clearing_prices
 
@@ -624,11 +624,11 @@ class MasterProblemCplex(MasterProblem):
 
     def _create_hbidvars(self):
         model = self.model
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             step_id_2_sbidvars = {}
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 var_name = 'x_' + str(bid_id) + '_' + str(step_id)
-                obj_coeff = step[0] * step[1]
+                obj_coeff = simple_bid.p * simple_bid.q
                 model.variables.add(obj=[obj_coeff], lb=[0.0], ub=[1.0], types=['C'], names=[var_name])
                 step_id_2_sbidvars[step_id] = var_name
             self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvars
@@ -644,15 +644,15 @@ class MasterProblemCplex(MasterProblem):
         self.model.objective.set_sense(self.model.objective.sense.maximize)
 
     def _create_balance_constraints(self):
-        inds = [[] for i in range(self.dam_data.number_of_periods)]
-        vals = [[] for i in range(self.dam_data.number_of_periods)]
+        inds = [[] for i in range(DamData.NUM_PERIODS)]
+        vals = [[] for i in range(DamData.NUM_PERIODS)]
 
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             period = hourly_bid.period
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 var_name = self.bid_id_2_hbidvars[bid_id][step_id]
                 inds[period - 1].append(self.model.variables.get_indices(var_name))
-                vals[period - 1].append(step[1])
+                vals[period - 1].append(simple_bid.q)
 
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             var_name = self.bid_id_2_bbidvar[bid_id]
@@ -661,10 +661,10 @@ class MasterProblemCplex(MasterProblem):
                 inds[t - 1].append(ind)
                 vals[t - 1].append(block_bid.quantity)
 
-        con_expr = [cpx.SparsePair(inds[t - 1], vals[t - 1]) for t in range(1, self.dam_data.number_of_periods + 1, 1)]
-        senses = ['E'] * self.dam_data.number_of_periods
-        rhs = [0.0] * self.dam_data.number_of_periods
-        con_names = ['balance_' + str(period) for period in range(1, self.dam_data.number_of_periods + 1, 1)]
+        con_expr = [cpx.SparsePair(inds[t - 1], vals[t - 1]) for t in range(1, DamData.NUM_PERIODS + 1, 1)]
+        senses = ['E'] * DamData.NUM_PERIODS
+        rhs = [0.0] * DamData.NUM_PERIODS
+        con_names = ['balance_' + str(period) for period in range(1, DamData.NUM_PERIODS + 1, 1)]
         self.model.linear_constraints.add(lin_expr=con_expr, senses=senses, rhs=rhs, names=con_names)
         self.period_2_balance_con = con_names
 
@@ -875,7 +875,7 @@ class LazyConstraintCallbackCplex(LazyConstraintCallback):
         sp.solve_model()
         solution = sp.model.solution
         market_clearing_prices = solution.get_dual_values(
-            ['balance_' + str(period) for period in range(1, dam_data.number_of_periods + 1, 1)])
+            ['balance_' + str(period) for period in range(1, DamData.NUM_PERIODS + 1, 1)])
         return market_clearing_prices
 
 
@@ -1047,7 +1047,7 @@ class MasterProblemScip(MasterProblem):
         self.model = scip.Model('master')
 
     def _create_hbidvars(self):
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             step_id_2_sbidvars = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
                 var_name = 'x_' + str(bid_id) + '_' + str(step_id)
@@ -1064,10 +1064,10 @@ class MasterProblemScip(MasterProblem):
         # set coefficients for simple bids
         variables = []
         coeffs = []
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 variables.append(bid_id_2_hbidvars[bid_id][step_id])
-                coeffs.append(step[0] * step[1])
+                coeffs.append(simple_bid.p * simple_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             variables.append(bid_id_2_bbidvar[bid_id])
@@ -1079,13 +1079,13 @@ class MasterProblemScip(MasterProblem):
         bid_id_2_hbidvars = self.bid_id_2_hbidvars
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         period_2_expr = {}
-        for period in range(1, self.dam_data.number_of_periods + 1, 1):
+        for period in range(1, DamData.NUM_PERIODS + 1, 1):
             period_2_expr[period] = [[], []]
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 variables, coeffs = period_2_expr[hourly_bid.period]
                 variables.append(bid_id_2_hbidvars[bid_id][step_id])
-                coeffs.append(step[1])
+                coeffs.append(simple_bid.q)
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 variables, coeffs = period_2_expr[t]
@@ -1364,7 +1364,7 @@ class LazyConstraintCallbackScip(scip.Conshdlr):
         # TODO: replace 'balance_' with a defined constant
         market_clearing_prices = [
             model.getDualsolLinear(con) for con in model.getConss() if con.name.find('balance') != -1]
-        return market_clearing_prices[:dam_data.number_of_periods]
+        return market_clearing_prices[:DamData.NUM_PERIODS]
 
     def conscheck(self, constraints, solution, check_integrality, check_lp_rows, print_reason, completely):
         if self._add_cut(check_only=True, sol=solution):
