@@ -268,12 +268,20 @@ class MasterProblemGurobi(MasterProblem):
         self.model = grb.Model('master')
 
     def _create_hbidvars(self):
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
-            step_id_2_sbidvars = {}
+            step_id_2_sbidvar = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
-                step_id_2_sbidvars[step_id] = self.model.addVar(
+                step_id_2_sbidvar[step_id] = self.model.addVar(
                     vtype=grb.GRB.CONTINUOUS, name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
-            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvars
+            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvar
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            step_id_2_sbidvar = {}
+            for step_id in hourly_bid.step_id_2_interpolated_bid.keys():
+                step_id_2_sbidvar[step_id] = self.model.addVar(
+                    vtype=grb.GRB.CONTINUOUS, name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
+            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvar
 
     def _create_bbidvars(self):
         for bid_id in self.dam_data.dam_bids.bid_id_2_block_bid.keys():
@@ -281,24 +289,39 @@ class MasterProblemGurobi(MasterProblem):
 
     def _create_obj_function(self):
         lin_expr = grb.LinExpr(0.0)
+        quad_expr = grb.QuadExpr(0.0)
         # set coefficients for simple bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 lin_expr.add(self.bid_id_2_hbidvars[bid_id][step_id], simple_bid.p * simple_bid.q)
+        # set coefficients for interpolated bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                svar = self.bid_id_2_hbidvars[bid_id][step_id]
+                lin_expr.add(svar, interpolated_bid.p_start * interpolated_bid.q)
+                quad_expr.add(
+                    svar * svar, 0.5 * (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             lin_expr.add(self.bid_id_2_bbidvar[bid_id], block_bid.num_period * block_bid.price * block_bid.quantity)
-        self.model.setObjective(lin_expr, grb.GRB.MAXIMIZE)
+        self.model.setObjective(lin_expr + quad_expr, grb.GRB.MAXIMIZE)
 
     def _create_balance_constraints(self):
         period_2_expr = {}
         for period in range(1, DamData.NUM_PERIODS + 1, 1):
             expr = grb.LinExpr(0.0)
             period_2_expr[period] = expr
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 expr = period_2_expr[hourly_bid.period]
                 expr.add(self.bid_id_2_hbidvars[bid_id][step_id], simple_bid.q)
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                expr = period_2_expr[hourly_bid.period]
+                expr.add(self.bid_id_2_hbidvars[bid_id][step_id], interpolated_bid.q)
+        # block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 expr = period_2_expr[t]
@@ -624,14 +647,22 @@ class MasterProblemCplex(MasterProblem):
 
     def _create_hbidvars(self):
         model = self.model
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
-            step_id_2_sbidvars = {}
-            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
+            step_id_2_sbidvar = {}
+            for step_id in hourly_bid.step_id_2_simple_bid:
                 var_name = 'x_' + str(bid_id) + '_' + str(step_id)
-                obj_coeff = simple_bid.p * simple_bid.q
-                model.variables.add(obj=[obj_coeff], lb=[0.0], ub=[1.0], types=['C'], names=[var_name])
-                step_id_2_sbidvars[step_id] = var_name
-            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvars
+                model.variables.add(lb=[0.0], ub=[1.0], types=['C'], names=[var_name])
+                step_id_2_sbidvar[step_id] = var_name
+            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvar
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            step_id_2_sbidvar = {}
+            for step_id in hourly_bid.step_id_2_interpolated_bid:
+                var_name = 'x_' + str(bid_id) + '_' + str(step_id)
+                model.variables.add(lb=[0.0], ub=[1.0], types=['C'], names=[var_name])
+                step_id_2_sbidvar[step_id] = var_name
+            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvar
 
     def _create_bbidvars(self):
         for bid_id, bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
@@ -641,19 +672,41 @@ class MasterProblemCplex(MasterProblem):
             self.bid_id_2_bbidvar[bid_id] = var_name
 
     def _create_obj_function(self):
-        self.model.objective.set_sense(self.model.objective.sense.maximize)
+        obj = self.model.objective
+        # set coefficients for simple bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
+                obj.set_linear(self.bid_id_2_hbidvars[bid_id][step_id], simple_bid.p * simple_bid.q)
+        # set coefficients for interpolated bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                svar = self.bid_id_2_hbidvars[bid_id][step_id]
+                obj.set_linear(svar, interpolated_bid.p_start * interpolated_bid.q)
+                # the multiplier 0.5 is dropped since it is already accounted for in the quadratic coefficients in Cplex
+                # https://www.ibm.com/support/knowledgecenter/SSSA5P_12.7.1/ilog.odms.cplex.help/refpythoncplex/html/
+                # cplex._internal._subinterfaces.ObjectiveInterface-class.html#set_quadratic_coefficients
+                obj.set_quadratic_coefficients(
+                    svar, svar, (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
+        obj.set_sense(self.model.objective.sense.maximize)
 
     def _create_balance_constraints(self):
         inds = [[] for i in range(DamData.NUM_PERIODS)]
         vals = [[] for i in range(DamData.NUM_PERIODS)]
-
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             period = hourly_bid.period
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 var_name = self.bid_id_2_hbidvars[bid_id][step_id]
                 inds[period - 1].append(self.model.variables.get_indices(var_name))
                 vals[period - 1].append(simple_bid.q)
-
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            period = hourly_bid.period
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                var_name = self.bid_id_2_hbidvars[bid_id][step_id]
+                inds[period - 1].append(self.model.variables.get_indices(var_name))
+                vals[period - 1].append(interpolated_bid.q)
+        # block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             var_name = self.bid_id_2_bbidvar[bid_id]
             ind = self.model.variables.get_indices(var_name)
@@ -739,7 +792,10 @@ class MasterProblemCplex(MasterProblem):
 
     def solve_fixed_model(self):
         self.fixed = self.model
-        self.fixed.set_problem_type(self.fixed.problem_type.fixed_MILP)
+        any_interpolated_bids = len(self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid) > 0
+        fixed_problem_type = self.fixed.problem_type.fixed_MIQP if any_interpolated_bids else \
+            self.fixed.problem_type.fixed_MILP
+        self.fixed.set_problem_type(fixed_problem_type)
         self.fixed.solve()
 
     def solve_relaxed_model(self):
@@ -1042,17 +1098,29 @@ class BendersDecompositionScip(BendersDecomposition):
 
 class MasterProblemScip(MasterProblem):
 
+    _QUADRATIC_OBJ_EXPR_VAR_NAME = "q_obj"
+
     def __init__(self, dam_data, working_dir):
         MasterProblem.__init__(self, dam_data, working_dir)
         self.model = scip.Model('master')
+        self._quad_obj_var = None
 
     def _create_hbidvars(self):
+        # step hourly bids
+        model = self.model
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
-            step_id_2_sbidvars = {}
-            for step_id in hourly_bid.step_id_2_simple_bid.keys():
+            step_id_2_sbidvar = {}
+            for step_id in hourly_bid.step_id_2_simple_bid:
                 var_name = 'x_' + str(bid_id) + '_' + str(step_id)
-                step_id_2_sbidvars[step_id] = self.model.addVar(vtype='C', name=var_name, lb=0, ub=1)
-            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvars
+                step_id_2_sbidvar[step_id] = model.addVar(vtype='C', name=var_name, lb=0, ub=1)
+            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvar
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            step_id_2_sbidvar = {}
+            for step_id in hourly_bid.step_id_2_interpolated_bid:
+                var_name = 'x_' + str(bid_id) + '_' + str(step_id)
+                step_id_2_sbidvar[step_id] = model.addVar(vtype='C', name=var_name, lb=0, ub=1)
+            self.bid_id_2_hbidvars[bid_id] = step_id_2_sbidvar
 
     def _create_bbidvars(self):
         for bid_id in self.dam_data.dam_bids.bid_id_2_block_bid.keys():
@@ -1062,18 +1130,37 @@ class MasterProblemScip(MasterProblem):
         bid_id_2_hbidvars = self.bid_id_2_hbidvars
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         # set coefficients for simple bids
-        variables = []
-        coeffs = []
+        lin_vars = []
+        lin_coeffs = []
+        quad_vars = []
+        quad_coeffs = []
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
-                variables.append(bid_id_2_hbidvars[bid_id][step_id])
-                coeffs.append(simple_bid.p * simple_bid.q)
+                lin_vars.append(bid_id_2_hbidvars[bid_id][step_id])
+                lin_coeffs.append(simple_bid.p * simple_bid.q)
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                lin_vars.append(bid_id_2_hbidvars[bid_id][step_id])
+                lin_coeffs.append(interpolated_bid.p_start * interpolated_bid.q)
+                quad_vars.append(bid_id_2_hbidvars[bid_id][step_id])
+                quad_coeffs.append(0.5 * (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
-            variables.append(bid_id_2_bbidvar[bid_id])
-            coeffs.append(block_bid.num_period * block_bid.price * block_bid.quantity)
-        self.model.setObjective(
-            scip.quicksum(variable * coeff for variable, coeff in zip(variables, coeffs)), 'maximize')
+            lin_vars.append(bid_id_2_bbidvar[bid_id])
+            lin_coeffs.append(block_bid.num_period * block_bid.price * block_bid.quantity)
+        obj_expr = [var * coeff for var, coeff in zip(lin_vars, lin_coeffs)]
+        # add quadratic objective variable if there are any interpolated bids
+        any_interpolated_bids = len(self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid) > 0
+        if any_interpolated_bids:
+            quad_obj_var = self.model.addVar(vtype='C', name=MasterProblemScip._QUADRATIC_OBJ_EXPR_VAR_NAME, lb=0)
+            obj_expr.append(quad_obj_var)
+            # add quadratic obj expression as a constraint: this is necessary as SCIP does not support non-linear obj
+            self.model.addCons(
+                quad_obj_var <= scip.quicksum(var * var * coeff for var, coeff in zip(quad_vars, quad_coeffs)), 
+                "quad_obj_con")
+        self.model.setObjective(scip.quicksum(obj_expr), 'maximize')
 
     def _create_balance_constraints(self):
         bid_id_2_hbidvars = self.bid_id_2_hbidvars
@@ -1081,11 +1168,19 @@ class MasterProblemScip(MasterProblem):
         period_2_expr = {}
         for period in range(1, DamData.NUM_PERIODS + 1, 1):
             period_2_expr[period] = [[], []]
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 variables, coeffs = period_2_expr[hourly_bid.period]
                 variables.append(bid_id_2_hbidvars[bid_id][step_id])
                 coeffs.append(simple_bid.q)
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                variables, coeffs = period_2_expr[hourly_bid.period]
+                variables.append(bid_id_2_hbidvars[bid_id][step_id])
+                coeffs.append(interpolated_bid.q)
+        # block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 variables, coeffs = period_2_expr[t]
@@ -1164,7 +1259,7 @@ class MasterProblemScip(MasterProblem):
             bid_id: self.model.getVal(bbidvar) for bid_id, bbidvar in self.bid_id_2_bbidvar.items()}
         self.fixed = self.model
         self.fixed.freeTransform()
-        # convert the problem into fixed MILP
+        # convert the problem into fixed MILP/MIQP
         for bid_id, var in self.bid_id_2_bbidvar.items():
             value = bbid_id_2_val[bid_id]
             if abs(value - 0.0) <= self.fixed.getParam('numerics/feastol'):
