@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 import modam.surplus_maximization.dam_constants as dc
+from modam.surplus_maximization.dam_exceptions import InvalidBidException
 from modam.surplus_maximization.dam_utils import interpolate
 
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,15 @@ logger = logging.getLogger(__name__)
 PriceQuantityPair = namedtuple("PriceQuantityPair", ["p", "q"])
 SimpleBid = namedtuple("SimpleBid", ["p", "q"])
 InterpolatedBid = namedtuple("InterpolatedBid", ["p_start", "p_end", "q"])
+
+
+class BidType(Enum):
+
+    STEP_HOURLY = 'S'
+    BLOCK = 'B'
+    FLEXIBLE = 'F'
+    PIECEWISE_HOURLY = 'P'
+    PROFILE_BLOCK = 'PB'
 
 
 class DamData:
@@ -65,12 +75,14 @@ class DamData:
             for _, row in sorted_df.iterrows():
                 bid_type = row[dc.DAM_DATA_BID_TYPE_HEADER]
                 bid_id = row[dc.DAM_DATA_BID_ID_HEADER]
-                num_of_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
+                num_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
                 period = row[dc.DAM_DATA_BID_PERIOD_HEADER]
                 price = row[dc.DAM_DATA_BID_PRICE_HEADER]
                 quantity = row[dc.DAM_DATA_BID_QUANTITY_HEADER]
                 link = row[dc.DAM_DATA_BID_LINK_HEADER]
-                block_bid = BlockBid(bid_id, num_of_periods, period, price, quantity, link)
+                block_bid = BlockBid(bid_id, num_periods, period, price, link)
+                for t in range(period, period + num_periods):
+                    block_bid.insert_quantity(t, quantity)
                 identical_bids.append(block_bid)
             bid_lists.append(identical_bids)
         bid_type_2_identical_bid_lists[BidType.BLOCK] = bid_lists
@@ -166,11 +178,7 @@ class DamData:
         return {step_id: simple_bid for step_id, simple_bid in step_id_2_simple_bid.items() if abs(simple_bid.q) > 0}
 
     def read_input(self, file_path):
-        """
-        Reads input data in the specified path and create dam_bids object
-        :param file_path: relative path of the input file
-        :return:
-        """
+        """Reads input data in the specified path and creates the bid set"""
         # read data as a data frame
         df = pd.read_csv(file_path, dtype=DamData._FIELD_NAME_2_DATA_TYPE)
         df = df.iloc[:, 4:]
@@ -183,17 +191,26 @@ class DamData:
         for index, row in df.iterrows():
             bid_type = row[dc.DAM_DATA_BID_TYPE_HEADER]
             bid_id = row[dc.DAM_DATA_BID_ID_HEADER]
-            num_of_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
+            num_periods = row[dc.DAM_DATA_BID_NUMBER_OF_PERIODS_HEADER]
             period = row[dc.DAM_DATA_BID_PERIOD_HEADER]
             price = row[dc.DAM_DATA_BID_PRICE_HEADER]
             quantity = row[dc.DAM_DATA_BID_QUANTITY_HEADER]
             link = row[dc.DAM_DATA_BID_LINK_HEADER]
             if bid_type == BidType.BLOCK.value:
-                block_bid = BlockBid(bid_id, num_of_periods, period, price, quantity, link)
-                bid_id_2_block_bid.update({block_bid.bid_id: block_bid})
+                block_bid = BlockBid(bid_id, num_periods, period, price, link)
+                for t in range(period, period + num_periods):
+                    block_bid.insert_quantity(t, quantity)
+                bid_id_2_block_bid[bid_id] = block_bid
+            elif bid_type == BidType.PROFILE_BLOCK.value:
+                if bid_id not in bid_id_2_block_bid:
+                    block_bid = BlockBid(bid_id, num_periods, period, price, link)
+                    block_bid.insert_quantity(period, quantity)
+                    bid_id_2_block_bid[bid_id] = block_bid
+                else:
+                    bid_id_2_block_bid[bid_id].insert_quantity(period, quantity)
             elif bid_type == BidType.FLEXIBLE.value:
-                flexible_bid = FlexibleBid(bid_id, num_of_periods, price, quantity)
-                bid_id_2_flexible_bid.update({flexible_bid.bid_id: flexible_bid})
+                flexible_bid = FlexibleBid(bid_id, num_periods, price, quantity)
+                bid_id_2_flexible_bid[bid_id] = flexible_bid
             elif bid_type == BidType.STEP_HOURLY.value:
                 if bid_id not in bid_id_2_step_hourly_bid:
                     hourly_bid = StepHourlyBid(bid_id, period)
@@ -217,9 +234,12 @@ class DamData:
                 DamData._create_interpolated_bids_from_piecewise_hourly_bid(hourly_bid)
         # create the identical bid lists
         bid_type_2_identical_bid_lists = DamData._create_idential_bid_lists(df)
-        self.dam_bids = DamBids(
+        dam_bids = DamBids(
             bid_id_2_step_hourly_bid, bid_id_2_piecewise_hourly_bid, bid_id_2_block_bid, bid_id_2_flexible_bid, 
             bid_type_2_identical_bid_lists=bid_type_2_identical_bid_lists)
+        # validate the bids
+        dam_bids.validate()
+        self.dam_bids = dam_bids
 
 
 class DamBids:
@@ -233,6 +253,15 @@ class DamBids:
         self.bid_id_2_flexible_bid = bid_id_2_flexible_bid
         self.bid_type_2_identical_bid_lists = bid_type_2_identical_bid_lists or {}
 
+    def validate(self):
+        """Validates the bid set"""
+        for hourly_bid in self.bid_id_2_step_hourly_bid.values():
+            hourly_bid.validate()
+        for hourly_bid in self.bid_id_2_piecewise_hourly_bid.values():
+            hourly_bid.validate()
+        for block_bid in self.bid_id_2_block_bid.values():
+            block_bid.validate()
+
 
 class Bid(ABC):
 
@@ -243,6 +272,10 @@ class Bid(ABC):
     @abstractmethod
     def print_bid(self):
         pass
+    
+    @abstractmethod
+    def validate(self):
+        """Validates the bid"""
 
 
 class PiecewiseHourlyBid(Bid):
@@ -267,6 +300,12 @@ class PiecewiseHourlyBid(Bid):
     def print_bid(self):
         pass
 
+    def validate(self):
+        previous_price = self.price_quantity_pairs[0].p
+        for price, _ in self.price_quantity_pairs[1:]:
+            if price <= previous_price:
+                raise InvalidBidException(f"prices must form an increasing sequence at block bid {self.bid_id}")
+
 
 class StepHourlyBid(Bid):
 
@@ -290,22 +329,47 @@ class StepHourlyBid(Bid):
     def print_bid(self):
         pass
 
+    def validate(self):
+        previous_price = self.price_quantity_pairs[0].p
+        for price, _ in self.price_quantity_pairs[1:]:
+            if price <= previous_price:
+                raise InvalidBidException(f"prices must form an increasing sequence at block bid {self.bid_id}")
+
 
 class BlockBid(Bid):
 
-    def __init__(self, bid_id, num_period, period, price, quantity, link):
+    def __init__(self, bid_id, num_period, period, price, link):
         super(BlockBid, self).__init__(bid_id, num_period)
         self.period = period
         self.price = price
-        self.quantity = quantity
+        self.quantities = [0.0] * DamData.NUM_PERIODS
         self.link = link
-        if quantity <= 0:
-            self.is_supply = True
-        else:
-            self.is_supply = False
+
+    def insert_quantity(self, period, quantity):
+        """Inserts the quantity at the specified period"""
+        self.quantities[period - 1] = quantity
+
+    @property
+    def is_supply(self):
+        """Returns True if the block bid is a supply block bid, otherwise False"""
+        return self.quantities[0] <= 0
 
     def print_bid(self):
         pass
+    
+    def quantity(self, period):
+        """Returns the quantity for the given period"""
+        return self.quantities[period - 1]
+
+    @property
+    def total_quantity(self):
+        """Returns the total quantity of the block bid"""
+        return sum(self.quantities)
+
+    def validate(self):
+        if not (all([q <= 0 for q in self.quantities]) or all([q >= 0 for q in self.quantities])):
+            raise InvalidBidException(
+                f"all quantities must be either non-positive or non-negative at block bid {self.bid_id}")
 
 
 class FlexibleBid(Bid):
@@ -318,13 +382,8 @@ class FlexibleBid(Bid):
     def print_bid(self):
         pass
 
-
-class BidType(Enum):
-
-    STEP_HOURLY = 'S'
-    BLOCK = 'B'
-    FLEXIBLE = 'F'
-    PIECEWISE_HOURLY = 'P'
+    def validate(self):
+        pass
 
 
 class InputStats:
@@ -333,7 +392,8 @@ class InputStats:
         self._average_block_bid_num_period = np.mean(
             [block_bid.num_period for block_bid in dam_data.dam_bids.bid_id_2_block_bid.values()])
         self._average_block_bid_quantity = np.mean(
-            [abs(block_bid.quantity) for block_bid in dam_data.dam_bids.bid_id_2_block_bid.values()])
+            [abs(block_bid.total_quantity / block_bid.num_period) for block_bid in 
+            dam_data.dam_bids.bid_id_2_block_bid.values()])
         self._number_of_step_hourly_bids = len(dam_data.dam_bids.bid_id_2_step_hourly_bid)
         self._number_of_piecewise_hourly_bids = len(dam_data.dam_bids.bid_id_2_piecewise_hourly_bid)
         self._number_of_block_bids = len(dam_data.dam_bids.bid_id_2_block_bid)

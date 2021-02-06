@@ -7,6 +7,10 @@ import os
 import modam.surplus_maximization.dam_constants as dc
 
 
+def calculate_block_bid_surplus(block_bid, market_clearing_prices):
+    return sum([q * (block_bid.price - market_clearing_prices[t]) for t, q in enumerate(block_bid.quantities)])
+
+
 def interpolate(p_start, q_start, p_end, q_end, p=None, q=None):
     assert p is not None or q is not None, "either 'p' or 'q' must be given to determine the interpolated point"
     if p is not None:
@@ -17,40 +21,27 @@ def interpolate(p_start, q_start, p_end, q_end, p=None, q=None):
     w = (q - q_start) / (q_end - q_start)
     return p_start + (p_end - p_start) * w
 
-def is_accepted_block_bid_pab(bid, mcp):
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        return bid.price > mcp_avg + dc.PRICE_COMP_TOL
-    else:
-        return bid.price < mcp_avg - dc.PRICE_COMP_TOL
+
+def is_accepted_block_bid_pab(block_bid, market_clearing_prices):
+    return calculate_block_bid_surplus(block_bid, market_clearing_prices) < - dc.PAB_PRB_SURPLUS_TOL
 
 
-def is_rejected_block_bid_prb(bid, mcp):
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        return bid.price < mcp_avg - dc.PRICE_COMP_TOL
-    else:
-        return bid.price > mcp_avg + dc.PRICE_COMP_TOL
+def is_rejected_block_bid_prb(block_bid, market_clearing_prices):
+    return calculate_block_bid_surplus(block_bid, market_clearing_prices) > dc.PAB_PRB_SURPLUS_TOL
 
 
 def calculate_bigm_for_block_bid_loss(block_bid, max_price=2000, min_price=0):
     if block_bid.is_supply:
-        return abs((block_bid.price - min_price) * block_bid.quantity * block_bid.num_period)
+        return abs((block_bid.price - min_price) * block_bid.total_quantity)
     # if demand
-    return abs((max_price - block_bid.price) * block_bid.quantity * block_bid.num_period)
+    return abs((max_price - block_bid.price) * block_bid.total_quantity)
 
 
 def calculate_bigm_for_block_bid_missed_surplus(block_bid, max_price=2000, min_price=0):
     if block_bid.is_supply:
-        return abs((max_price - block_bid.price) * block_bid.quantity * block_bid.num_period)
+        return abs((max_price - block_bid.price) * block_bid.total_quantity)
     # if demand
-    return abs((block_bid.price - min_price) * block_bid.quantity * block_bid.num_period)
+    return abs((block_bid.price - min_price) * block_bid.total_quantity)
 
 
 def do_block_bids_have_common_period(this_block_bid, that_block_bid):
@@ -141,7 +132,6 @@ def create_gcut_for_supply_prb(
         if do_block_bids_have_common_period(prb, block_bid):
             variables.append(bid_id_2_bbid_var[bbid_id])
             coefficients.append(1)
-
     # find intersecting accepted demand block bids
     for bbid_id in accepted_demand_block_bid_ids:
         block_bid = bid_id_2_block_bid[bbid_id]
@@ -204,40 +194,26 @@ def create_gcut_for_demand_prb(
     return variables, coefficients, rhs
 
 
-def get_pab_info(bid, mcp):
-    """Returns (True, price_gap, loss) tuple if the bid is a pab, otherwise (False, 0, 0)"""
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        if bid.price > mcp_avg + dc.PRICE_COMP_TOL:
-            return True, bid.price - mcp_avg, (mcp_avg - bid.price) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
-    else:
-        if bid.price < mcp_avg - dc.PRICE_COMP_TOL:
-            return True, mcp_avg - bid.price, (mcp_avg - bid.price) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
+def get_pab_info(block_bid, mcp):
+    """Returns (True, price_gap, loss) tuple if the accepted block bid is a PAB, otherwise (False, 0, 0)"""
+    mcp_avg = sum([q * mcp[t] for t, q in enumerate(block_bid.quantities)]) / block_bid.total_quantity if \
+        abs(block_bid.total_quantity) > 0 else 0.0
+    surplus = calculate_block_bid_surplus(block_bid, mcp)
+    if surplus > -dc.PAB_PRB_SURPLUS_TOL:
+        return False, 0, 0
+    price_gap = block_bid.price - mcp_avg if block_bid.is_supply else mcp_avg - block_bid.price
+    return True, price_gap, -surplus
 
 
-def get_prb_info(bid, mcp):
-    """Returns (True, price_gap, missed_surplus) tuple if the bid is a prb, otherwise (False, 0, 0)"""
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        if bid.price < mcp_avg - dc.PRICE_COMP_TOL:
-            return True, mcp_avg - bid.price, (bid.price - mcp_avg) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
-    else:
-        if bid.price > mcp_avg + dc.PRICE_COMP_TOL:
-            return True, bid.price - mcp_avg, (bid.price - mcp_avg) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
+def get_prb_info(block_bid, mcp):
+    """Returns (True, price_gap, missed_surplus) tuple if the rejected block bid is a PRB, otherwise (False, 0, 0)"""
+    mcp_avg = sum([q * mcp[t] for t, q in enumerate(block_bid.quantities)]) / block_bid.total_quantity if \
+        abs(block_bid.total_quantity) > 0 else 0.0
+    surplus = calculate_block_bid_surplus(block_bid, mcp)
+    if surplus < dc.PAB_PRB_SURPLUS_TOL:
+        return False, 0, 0
+    price_gap = mcp_avg - block_bid.price if block_bid.is_supply else block_bid.price - mcp_avg
+    return True, price_gap, surplus
 
 
 def generate_market_result_statistics(dam_bids, dam_solution):
@@ -261,7 +237,7 @@ def generate_market_result_statistics(dam_bids, dam_solution):
         loss += loss_
         average_pab_price_gap += price_gap_
         if not pab_with_max_price_gap or pab_with_max_price_gap[2] < price_gap_:
-            pab_with_max_price_gap = (abs(bid.quantity), bid.num_period, price_gap_)
+            pab_with_max_price_gap = (abs(bid.total_quantity) / bid.num_period, bid.num_period, price_gap_)
     average_pab_price_gap = (average_pab_price_gap / len(pabs)) if pabs else None
 
     for bid_id in dam_solution.rejected_block_bids:
@@ -273,7 +249,7 @@ def generate_market_result_statistics(dam_bids, dam_solution):
         missed_surplus += missed_surplus_
         average_prb_price_gap += price_gap_
         if not prb_with_max_price_gap or prb_with_max_price_gap[2] < price_gap_:
-            prb_with_max_price_gap = (abs(bid.quantity), bid.num_period, price_gap_)
+            prb_with_max_price_gap = (abs(bid.total_quantity) / bid.num_period, bid.num_period, price_gap_)
     average_prb_price_gap = (average_prb_price_gap / len(prbs)) if prbs else None
 
     # update the solution

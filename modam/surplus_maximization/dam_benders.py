@@ -303,7 +303,7 @@ class MasterProblemGurobi(MasterProblem):
                     svar * svar, 0.5 * (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
-            lin_expr.add(self.bid_id_2_bbidvar[bid_id], block_bid.num_period * block_bid.price * block_bid.quantity)
+            lin_expr.add(self.bid_id_2_bbidvar[bid_id], block_bid.price * block_bid.total_quantity)
         self.model.setObjective(lin_expr + quad_expr, grb.GRB.MAXIMIZE)
 
     def _create_balance_constraints(self):
@@ -325,7 +325,7 @@ class MasterProblemGurobi(MasterProblem):
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 expr = period_2_expr[t]
-                expr.add(self.bid_id_2_bbidvar[bid_id], block_bid.quantity)
+                expr.add(self.bid_id_2_bbidvar[bid_id], block_bid.quantity(t))
         for period, expr in period_2_expr.items():
             constraint = self.model.addConstr(expr, grb.GRB.EQUAL, 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
@@ -667,8 +667,7 @@ class MasterProblemCplex(MasterProblem):
     def _create_bbidvars(self):
         for bid_id, bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             var_name = 'y_' + str(bid_id)
-            obj_coeff = bid.price * bid.quantity * bid.num_period
-            self.model.variables.add(obj=[obj_coeff], lb=[0.0], ub=[1.0], types=['B'], names=[var_name])
+            self.model.variables.add(lb=[0.0], ub=[1.0], types=['B'], names=[var_name])
             self.bid_id_2_bbidvar[bid_id] = var_name
 
     def _create_obj_function(self):
@@ -687,6 +686,10 @@ class MasterProblemCplex(MasterProblem):
                 # cplex._internal._subinterfaces.ObjectiveInterface-class.html#set_quadratic_coefficients
                 obj.set_quadratic_coefficients(
                     svar, svar, (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
+        # set coefficients for block bids
+        for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
+            obj.set_linear(self.bid_id_2_bbidvar[bid_id], block_bid.price * block_bid.total_quantity)
+        # set obj sense
         obj.set_sense(self.model.objective.sense.maximize)
 
     def _create_balance_constraints(self):
@@ -712,7 +715,7 @@ class MasterProblemCplex(MasterProblem):
             ind = self.model.variables.get_indices(var_name)
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 inds[t - 1].append(ind)
-                vals[t - 1].append(block_bid.quantity)
+                vals[t - 1].append(block_bid.quantity(t))
 
         con_expr = [cpx.SparsePair(inds[t - 1], vals[t - 1]) for t in range(1, DamData.NUM_PERIODS + 1, 1)]
         senses = ['E'] * DamData.NUM_PERIODS
@@ -1149,7 +1152,7 @@ class MasterProblemScip(MasterProblem):
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             lin_vars.append(bid_id_2_bbidvar[bid_id])
-            lin_coeffs.append(block_bid.num_period * block_bid.price * block_bid.quantity)
+            lin_coeffs.append(block_bid.price * block_bid.total_quantity)
         obj_expr = [var * coeff for var, coeff in zip(lin_vars, lin_coeffs)]
         # add quadratic objective variable if there are any interpolated bids
         any_interpolated_bids = len(self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid) > 0
@@ -1185,7 +1188,7 @@ class MasterProblemScip(MasterProblem):
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 variables, coeffs = period_2_expr[t]
                 variables.append(bid_id_2_bbidvar[bid_id])
-                coeffs.append(block_bid.quantity)
+                coeffs.append(block_bid.quantity(t))
         for period, expr in period_2_expr.items():
             variables, coeffs = expr
             constraint = self.model.addCons(

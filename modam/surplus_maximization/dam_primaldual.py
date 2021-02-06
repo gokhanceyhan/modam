@@ -14,6 +14,8 @@ from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_lo
 
 class PrimalDualModel:
 
+    # MODAM_TO_DO: integrate piecewise hourly bids
+
     def __init__(self, prob_type, dam_data, prob_name, working_dir):
         self.prob_type = prob_type
         self.dam_data = dam_data
@@ -77,7 +79,7 @@ class PrimalDualModel:
         for period in range(DamData.NUM_PERIODS):
             var = self.model.addVar(
                 vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=DamData.MIN_PRICE, ub=DamData.MAX_PRICE)
-            self.period_2_pi[period+1] = var
+            self.period_2_pi[period + 1] = var
 
     def _create_obj_function(self):
         lin_expr = grb.LinExpr(0.0)
@@ -87,7 +89,7 @@ class PrimalDualModel:
                 lin_expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], simple_bid.p * simple_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
-            lin_expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.num_period * block_bid.price * block_bid.quantity)
+            lin_expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.price * block_bid.total_quantity)
         self.model.setObjective(lin_expr, grb.GRB.MAXIMIZE)
         self.surplus_expr.add(lin_expr)
 
@@ -103,7 +105,7 @@ class PrimalDualModel:
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 expr = period_2_expr[t]
-                expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.quantity)
+                expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.quantity(t))
         for period, expr in period_2_expr.items():
             constraint = self.model.addConstr(expr, grb.GRB.EQUAL, 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
@@ -113,6 +115,7 @@ class PrimalDualModel:
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         model = self.model
         period_2_pi = self.period_2_pi
+        # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 expr = grb.LinExpr(0.0)
@@ -122,15 +125,14 @@ class PrimalDualModel:
                 q = simple_bid.q
                 expr.addTerms([1, q], [svar, pi])
                 model.addConstr(expr, grb.GRB.GREATER_EQUAL, p*q, 'dual_' + str(bid_id) + '_' + str(step_id))
-
+        # block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             expr = grb.LinExpr(0.0)
             y, s, l, m = bid_id_2_bbidvar[bid_id]
-            p = block_bid.num_period * [block_bid.price]
-            q = block_bid.num_period * [block_bid.quantity]
-            pi = list(period_2_pi.values())
-            pi = pi[block_bid.period-1:block_bid.period+block_bid.num_period-1]
-            rhs = sum([i*j for i, j in zip(p, q)])
+            p = [block_bid.price] * DamData.NUM_PERIODS
+            q = block_bid.quantities
+            pi = [period_2_pi[t + 1] for t in range(DamData.NUM_PERIODS)]
+            rhs = sum([i * j for i, j in zip(p, q)])
             expr.addTerms([1, -1, 1], [s, l, m])
             expr.addTerms(q, pi)
             model.addConstr(expr, grb.GRB.GREATER_EQUAL, rhs, 'dual_' + str(bid_id))
@@ -139,7 +141,6 @@ class PrimalDualModel:
         bid_id_2_step_id_2_sbidvar = self.bid_id_2_step_id_2_sbidvar
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         model = self.model
-
         lin_expr = grb.LinExpr(0.0)
         # set coefficients for simple bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
@@ -150,7 +151,7 @@ class PrimalDualModel:
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             y, s, l, m = bid_id_2_bbidvar[bid_id]
-            lin_expr.add(y, block_bid.num_period * block_bid.price * block_bid.quantity)
+            lin_expr.add(y, block_bid.price * block_bid.total_quantity)
             lin_expr.addTerms([-1, 1], [s, l])
         model.addConstr(lin_expr, grb.GRB.GREATER_EQUAL, 0.0, 'sd')
 
