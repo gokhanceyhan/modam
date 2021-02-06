@@ -35,10 +35,10 @@ class PrimalDualModel:
         self._create_obj_function()
         self._create_constraints()
         self._write_model()
-        return os.path.join(self._working_dir, self.prob_name + '.mps')
+        return os.path.join(self._working_dir, self.prob_name + '.lp')
 
     def _write_model(self):
-        self.model.write(os.path.join(self._working_dir, self.prob_name + '.mps'))
+        self.model.write(os.path.join(self._working_dir, self.prob_name + '.lp'))
 
     def _create_variables(self):
         self._create_hbidvars()
