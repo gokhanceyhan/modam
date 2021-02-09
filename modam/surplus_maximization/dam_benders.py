@@ -11,7 +11,7 @@ from modam.surplus_maximization.dam_common import BendersDecompositionStats, Dam
     OptimizationStats, OptimizationStatus, ProblemType, SolutionApproach, Solver, SolverParameters
 import modam.surplus_maximization.dam_constants as dc
 from modam.surplus_maximization.dam_exceptions import UnsupportedProblemException
-from modam.surplus_maximization.dam_input import BidType, DamData
+from modam.surplus_maximization.dam_input import BidType, ConstraintType, DamData
 from modam.surplus_maximization.dam_post_problem import PostProblemGurobiModel
 import modam.surplus_maximization.dam_utils as du
 
@@ -330,6 +330,21 @@ class MasterProblemGurobi(MasterProblem):
             constraint = self.model.addConstr(expr, grb.GRB.EQUAL, 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
 
+    def _create_block_bid_constraints(self):
+        """Creates the constraints for the linked block bids, mutually exclusive block bids and flexible bids"""
+        constraints = self.dam_data.block_bid_constraints_matrix
+        rhs = self.dam_data.block_bid_constraints_rhs
+        vars_ = [self.bid_id_2_bbidvar[bid_id] for bid_id in self.dam_data.block_bid_constraints_bid_ids]
+        types = self.dam_data.block_bid_constraints_types
+        constraint_type_2_constraint_sense = {
+            ConstraintType.EQUAL_TO: grb.GRB.EQUAL,
+            ConstraintType.GREATER_THAN_EQUAL_TO: grb.GRB.GREATER_EQUAL,
+            ConstraintType.LESS_THAN_EQUAL_TO: grb.GRB.LESS_EQUAL}
+        for index, (constraint, rhs_, type_) in enumerate(zip(constraints, rhs, types)):
+            sense = constraint_type_2_constraint_sense[type_]
+            name = f"block_bid_constraints_{index}"
+            self.model.addConstr(grb.quicksum([c * var for c, var in zip(constraint, vars_)]), sense, rhs, name)
+
     def _create_cuts_for_identical_bids(self):
         """Sets a complete ordering for the acceptance of identical bid sets
         
@@ -354,6 +369,7 @@ class MasterProblemGurobi(MasterProblem):
         self._create_obj_function()
         # create constraint set
         self._create_balance_constraints()
+        self._create_block_bid_constraints()
         # create identical bid cuts
         self._create_cuts_for_identical_bids()
         self.model.update()
