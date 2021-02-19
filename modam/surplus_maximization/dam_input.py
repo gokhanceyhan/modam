@@ -70,6 +70,7 @@ class DamData:
         self.dam_original_bids = None
         self.dam_bids = None
         self.block_bid_id_2_linked_block_bid_id = None
+        self.block_bid_id_2_child_block_bids = None
         self.exclusive_group_id_2_block_bid_ids = None
         self.block_bid_constraints_matrix = None
         self.block_bid_constraints_bid_ids = None
@@ -88,7 +89,8 @@ class DamData:
             quantities = flexible_bid.quantities
             for period in range(start_period, end_period - num_period + 2):
                 block_bid_id = DamData._FLEXIBLE_BID_CONVERTED_ID_TEMPLATE.format(id=bid_id, period=period)
-                block_bid = BlockBid(block_bid_id, num_period, period, price, exclusive_group_id=bid_id)
+                block_bid = BlockBid(
+                    block_bid_id, num_period, period, price, exclusive_group_id=bid_id, from_flexible=True)
                 for tidx, q in enumerate(quantities):
                     block_bid.insert_quantity(period + tidx, q)
                 bid_id_2_block_bid[block_bid_id] = block_bid
@@ -102,13 +104,18 @@ class DamData:
         block_bid_id_2_index = {block_bid_id: index for index, block_bid_id in enumerate(block_bid_ids)}
         exclusive_group_id_2_block_bid_ids = defaultdict(list)
         block_bid_id_2_linked_block_bid_id = {}
+        block_bid_id_2_child_block_bids = defaultdict(list)
         for block_bid in block_bids:
             if block_bid.link is not None:
-                block_bid_id_2_linked_block_bid_id[block_bid.bid_id] = block_bid.link
+                parent_bid_id = block_bid.link
+                block_bid_id_2_linked_block_bid_id[block_bid.bid_id] = parent_bid_id
+                block_bid_id_2_child_block_bids[parent_bid_id].append(block_bid)
             if block_bid.exclusive_group_id is not None:
                 exclusive_group_id_2_block_bid_ids[block_bid.exclusive_group_id].append(block_bid.bid_id)
         self.block_bid_id_2_linked_block_bid_id = block_bid_id_2_linked_block_bid_id
+        self.block_bid_id_2_child_block_bids = block_bid_id_2_child_block_bids
         self.exclusive_group_id_2_block_bid_ids = exclusive_group_id_2_block_bid_ids
+        # create the constraint matrix and rhs
         num_variables = len(block_bid_ids)
         num_constraints = len(exclusive_group_id_2_block_bid_ids) + len(block_bid_id_2_linked_block_bid_id)
         matrix = np.zeros((num_constraints, num_variables))
@@ -137,8 +144,11 @@ class DamData:
         
         NOTE: Currently, only block bids are checked."""
         bid_type_2_identical_bid_lists = {}
-        block_bids_df = bids_df[(bids_df["bid_type"] == BidType.BLOCK.value) & (bids_df["link"].isnull())].reset_index(
-            drop=True)
+        block_bids_df = bids_df[
+            (bids_df["bid_type"] == BidType.BLOCK.value) & (bids_df["link"].isnull())].reset_index(drop=True)
+        exclusive_group_column_exists = dc.DAM_DATA_BID_EXCLUSIVE_GROUP_ID_HEADER in bids_df.columns
+        if exclusive_group_column_exists:
+            block_bids_df = block_bids_df[block_bids_df["exclusive_group_id"].isnull()]
         bid_lists = []
         for name, df_ in block_bids_df.groupby(by=["period", "num_periods", "quantity", "price"]):
             if df_["bid_id"].count() == 1:
@@ -448,13 +458,14 @@ class StepHourlyBid(Bid):
 
 class BlockBid(Bid):
 
-    def __init__(self, bid_id, num_period, period, price, exclusive_group_id=None, link=None):
+    def __init__(self, bid_id, num_period, period, price, exclusive_group_id=None, from_flexible=False, link=None):
         super(BlockBid, self).__init__(bid_id, num_period)
         self.period = period
         self.price = price
         self.quantities = [0.0] * DamData.NUM_PERIODS
         self.link = link
         self.exclusive_group_id = exclusive_group_id
+        self.from_flexible = from_flexible
 
     def insert_quantity(self, period, quantity):
         """Inserts the quantity at the specified period"""
@@ -530,15 +541,17 @@ class FlexibleBid(Bid):
 class InputStats:
 
     def __init__(self, dam_data):
+        bids = dam_data.dam_original_bids
         self._average_block_bid_num_period = np.mean(
-            [block_bid.num_period for block_bid in dam_data.dam_bids.bid_id_2_block_bid.values()])
+            [block_bid.num_period for block_bid in bids.bid_id_2_block_bid.values()])
         self._average_block_bid_quantity = np.mean(
-            [abs(block_bid.total_quantity / block_bid.num_period) for block_bid in 
-            dam_data.dam_bids.bid_id_2_block_bid.values()])
-        self._number_of_step_hourly_bids = len(dam_data.dam_bids.bid_id_2_step_hourly_bid)
-        self._number_of_piecewise_hourly_bids = len(dam_data.dam_bids.bid_id_2_piecewise_hourly_bid)
-        self._number_of_block_bids = len(dam_data.dam_bids.bid_id_2_block_bid)
-        self._number_of_flexible_bids = len(dam_data.dam_bids.bid_id_2_flexible_bid)
+            [abs(block_bid.total_quantity / block_bid.num_period) for block_bid in bids.bid_id_2_block_bid.values()])
+        self._number_of_step_hourly_bids = len(bids.bid_id_2_step_hourly_bid)
+        self._number_of_piecewise_hourly_bids = len(bids.bid_id_2_piecewise_hourly_bid)
+        self._number_of_block_bids = len(bids.bid_id_2_block_bid)
+        self._number_of_flexible_bids = len(bids.bid_id_2_flexible_bid)
+        self._number_of_linked_block_bids = len(
+            [block_bid for block_bid in bids.bid_id_2_block_bid.values() if block_bid.link])
     
     def average_block_bid_num_period(self):
         """Returns the average block bid number of periods"""
@@ -564,9 +577,14 @@ class InputStats:
         """Returns the number of flexible bids"""
         return self._number_of_flexible_bids
 
+    def number_of_linked_block_bids(self):
+        """Returns the number of linked block bids"""
+        return self._number_of_linked_block_bids
+
     def print_stats(self):
         logger.info('Printing input stats...')
         logger.info('Number of step hourly bids: %s', self._number_of_step_hourly_bids)
         logger.info('Number of piecewise linear hourly bids: %s', self._number_of_piecewise_hourly_bids)
         logger.info('Number of block bids: %s', self._number_of_block_bids)
         logger.info('Number of flexible bids: %s', self._number_of_flexible_bids)
+        logger.info('Number of linked block bids: %s', self._number_of_linked_block_bids)

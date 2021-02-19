@@ -212,17 +212,29 @@ class BendersDecompositionGurobi(BendersDecomposition):
     def _get_best_solution(self, use_post_processing_problem=False):
         # fill solution
         mp = self.master_problem
+        # the block bids in 'dam_bids' include both original block bids and the block bids generated from flexible bids
+        bid_id_2_block_bid = self.dam_data.dam_bids.bid_id_2_block_bid
+        bid_id_2_flexible_bid = self.dam_data.dam_original_bids.bid_id_2_flexible_bid
         dam_soln = DamSolution()
         dam_soln.total_surplus = mp.fixed.ObjVal
         y = mp.fixed.getAttr('X', mp.bid_id_2_bbidvar)
         block_bid_id_2_value = {}
         for bid_id, value in y.items():
+            bid = bid_id_2_block_bid[bid_id]
             if abs(value - 0.0) <= mp.fixed.Params.IntFeasTol:
-                dam_soln.rejected_block_bids.append(bid_id)
                 block_bid_id_2_value[bid_id] = 0
+                if not bid.from_flexible:
+                    dam_soln.rejected_block_bids.append(bid_id)
             else:
-                dam_soln.accepted_block_bids.append(bid_id)
                 block_bid_id_2_value[bid_id] = 1
+                if bid.from_flexible:
+                    dam_soln.accepted_block_bids_from_flexible_bids.append(bid_id)
+                    flexible_bid_id = bid.exclusive_group_id
+                    dam_soln.accepted_flexible_bids.append(flexible_bid_id)
+                else:
+                    dam_soln.accepted_block_bids.append(bid_id)
+        dam_soln.rejected_flexible_bids = [
+            bid_id for bid_id in bid_id_2_flexible_bid if bid_id not in dam_soln.accepted_flexible_bids]
         post_problem_result = None
         if use_post_processing_problem:
             post_problem = PostProblemGurobiModel(self.dam_data, self._working_dir)
@@ -231,7 +243,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
             dam_soln.market_clearing_prices = post_problem_result.prices()
         else:
             dam_soln.market_clearing_prices = mp.fixed.getAttr('Pi', mp.period_2_balance_con.values())
-        dam_soln = du.generate_market_result_statistics(self.dam_data.dam_bids, dam_soln)
+        dam_soln = du.generate_market_result_statistics(self.dam_data, dam_soln)
         return dam_soln
 
     def _get_solver_output(self):
@@ -313,13 +325,13 @@ class MasterProblemGurobi(MasterProblem):
             period_2_expr[period] = expr
         # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            expr = period_2_expr[hourly_bid.period]
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
-                expr = period_2_expr[hourly_bid.period]
                 expr.add(self.bid_id_2_hbidvars[bid_id][step_id], simple_bid.q)
         # piecewise hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            expr = period_2_expr[hourly_bid.period]
             for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
-                expr = period_2_expr[hourly_bid.period]
                 expr.add(self.bid_id_2_hbidvars[bid_id][step_id], interpolated_bid.q)
         # block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
@@ -343,7 +355,7 @@ class MasterProblemGurobi(MasterProblem):
         for index, (constraint, rhs_, type_) in enumerate(zip(constraints, rhs, types)):
             sense = constraint_type_2_constraint_sense[type_]
             name = f"block_bid_constraints_{index}"
-            self.model.addConstr(grb.quicksum([c * var for c, var in zip(constraint, vars_)]), sense, rhs, name)
+            self.model.addConstr(grb.quicksum([c * var for c, var in zip(constraint, vars_)]), sense, rhs_, name)
 
     def _create_cuts_for_identical_bids(self):
         """Sets a complete ordering for the acceptance of identical bid sets
@@ -499,10 +511,12 @@ class CallbackGurobi:
     @staticmethod
     def _generate_gcuts(model, accepted_block_bids, rejected_block_bids):
         bid_id_2_block_bid = model._dam_data.dam_bids.bid_id_2_block_bid
+        block_bid_id_2_child_block_bids = model._dam_data.block_bid_id_2_child_block_bids
         bid_id_2_bbidvar = model._bid_id_2_bbidvar
         market_clearing_prices = CallbackGurobi._find_market_clearing_prices(
             model, accepted_block_bids, rejected_block_bids)
-        pabs = du.find_pabs(market_clearing_prices, accepted_block_bids, bid_id_2_block_bid) \
+        pabs = du.find_pabs(
+            market_clearing_prices, accepted_block_bids, bid_id_2_block_bid, block_bid_id_2_child_block_bids) \
             if model._prob is ProblemType.NoPab else []
         prbs = du.find_prbs(market_clearing_prices, rejected_block_bids, bid_id_2_block_bid) \
             if model._prob is ProblemType.NoPrb else []
@@ -1189,14 +1203,14 @@ class MasterProblemScip(MasterProblem):
             period_2_expr[period] = [[], []]
         # step hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            variables, coeffs = period_2_expr[hourly_bid.period]
             for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
-                variables, coeffs = period_2_expr[hourly_bid.period]
                 variables.append(bid_id_2_hbidvars[bid_id][step_id])
                 coeffs.append(simple_bid.q)
         # piecewise hourly bids
         for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            variables, coeffs = period_2_expr[hourly_bid.period]
             for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
-                variables, coeffs = period_2_expr[hourly_bid.period]
                 variables.append(bid_id_2_hbidvars[bid_id][step_id])
                 coeffs.append(interpolated_bid.q)
         # block bids
