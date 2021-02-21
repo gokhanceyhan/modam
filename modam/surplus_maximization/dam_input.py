@@ -43,7 +43,6 @@ class ConstraintType(Enum):
 
 class DamData:
 
-    _BID_ID_TEMPLATE = "{bid_type}_{id}"
     _FIELD_NAME_2_DATA_TYPE = {
         "bid_id": str,
         "bucket_id": "int16",
