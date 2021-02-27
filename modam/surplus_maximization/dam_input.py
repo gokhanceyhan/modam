@@ -473,7 +473,7 @@ class BlockBid(Bid):
     @property
     def is_supply(self):
         """Returns True if the block bid is a supply block bid, otherwise False"""
-        return self.quantities[0] <= 0
+        return self.quantities[self.period - 1] <= 0
 
     def print_bid(self):
         return self.__dict__

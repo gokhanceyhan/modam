@@ -487,11 +487,10 @@ class CallbackGurobi:
             sub_problem_obj = model._sp.objval
             if sub_problem_obj > node_obj + dc.OBJ_COMP_TOL:
                 # add lazy constraint to cut this solution
-                CallbackGurobi._generate_lazy_cuts(
-                    model, accepted_block_bids, rejected_block_bids, model._bid_id_2_bbidvar)
+                CallbackGurobi._generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod
-    def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids, bid_id_2_bbidvar):
+    def _generate_lazy_cuts(model, accepted_block_bids, rejected_block_bids):
         CallbackGurobi._generate_gcuts(model, accepted_block_bids, rejected_block_bids)
 
     @staticmethod

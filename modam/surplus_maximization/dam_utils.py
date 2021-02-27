@@ -28,6 +28,7 @@ def is_accepted_block_bid_pab(
     if surplus >= -dc.PAB_PRB_SURPLUS_TOL:
         return False
     child_block_bids = block_bid_id_2_child_block_bids[block_bid.bid_id]
+    
     def calculate_surplus_of_child_block_bids(child_block_bids_):
         surplus_ = 0.0
         for block_bid_ in child_block_bids_:
@@ -41,7 +42,7 @@ def is_accepted_block_bid_pab(
         return surplus_
 
     surplus += calculate_surplus_of_child_block_bids(child_block_bids)
-    return  surplus < -dc.PAB_PRB_SURPLUS_TOL
+    return surplus < -dc.PAB_PRB_SURPLUS_TOL
 
 
 def is_rejected_block_bid_prb(block_bid, market_clearing_prices):
@@ -88,7 +89,6 @@ def find_prbs(market_clearing_prices, rejected_block_bid_ids, bid_id_2_block_bid
 
 
 def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-
     if pab.is_supply:
         variables, coefficients, rhs = create_gcut_for_supply_pab(
             pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
@@ -99,7 +99,6 @@ def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid
 
 
 def create_gcut_for_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-
     if prb.is_supply:
         variables, coefficients, rhs = create_gcut_for_supply_prb(
             prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
