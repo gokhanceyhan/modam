@@ -317,7 +317,7 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
     def _get_best_solution(self):
         # fill solution
         dam_soln = DamSolution()
-        dam_soln.total_surplus = -1 * self.model.ObjVal
+        dam_soln.total_surplus = self.model.ObjVal
         varname_2_bbidvar = {x.VarName: x for x in self.model.getVars() if x.VarName.find('y_') == 0}
         y = self.model.getAttr('X', varname_2_bbidvar)
         for name, value in y.items():
@@ -376,7 +376,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         solution = self.model.solution
         # fill dam solution object
         dam_soln = DamSolution()
-        dam_soln.total_surplus = -1 * solution.get_objective_value()
+        dam_soln.total_surplus = solution.get_objective_value()
         bbid_varnames = [name for name in self.model.variables.get_names() if name.find('y_') == 0]
         varname_2_y = {name: solution.get_values(name) for name in bbid_varnames}
         for name, y in varname_2_y.items():
@@ -433,7 +433,7 @@ class PrimalDualScipSolver(PrimalDualSolver):
         model = self.model
         # fill dam solution object
         dam_soln = DamSolution()
-        dam_soln.total_surplus = -1 * model.getObjVal()
+        dam_soln.total_surplus = model.getObjVal()
         varname_2_bbidvar = {x.name: x for x in model.getVars() if x.name.find('y_') == 0}
         varname_2_y = {name: model.getVal(var) for name, var in varname_2_bbidvar.items()}
         for name, value in varname_2_y.items():
