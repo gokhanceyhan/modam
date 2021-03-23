@@ -9,7 +9,7 @@ from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, 
     ProblemType
 from modam.surplus_maximization.dam_input import BidType, ConstraintType, DamData
 from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss, \
-    calculate_bigm_for_block_bid_missed_surplus
+    calculate_bigm_for_block_bid_missed_surplus, generate_market_result_statistics
 
 
 class PrimalDualModel:
@@ -273,7 +273,8 @@ class PrimalDualModel:
 
 class PrimalDualSolver(object):
 
-    def __init__(self, prob_name, solver_params, working_dir):
+    def __init__(self, dam_data, prob_name, solver_params, working_dir):
+        self.dam_data = dam_data
         self.prob_name = prob_name
         self.solver_params = solver_params
         self._working_dir = working_dir
@@ -297,8 +298,8 @@ class PrimalDualSolver(object):
 
 class PrimalDualGurobiSolver(PrimalDualSolver):
 
-    def __init__(self, prob_name, solver_params, working_dir):
-        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
+    def __init__(self, dam_data, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, dam_data, prob_name, solver_params, working_dir)
         self.model = grb.read(prob_name)
 
     def solve(self):
@@ -315,6 +316,8 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         self.model.Params.FeasibilityTol = 1e-9
 
     def _get_best_solution(self):
+        bid_id_2_block_bid = self.dam_data.dam_bids.bid_id_2_block_bid
+        bid_id_2_flexible_bid = self.dam_data.dam_original_bids.bid_id_2_flexible_bid
         # fill solution
         dam_soln = DamSolution()
         dam_soln.total_surplus = self.model.ObjVal
@@ -322,11 +325,21 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         y = self.model.getAttr('X', varname_2_bbidvar)
         for name, value in y.items():
             bid_id = name[2:]
+            bid = bid_id_2_block_bid[bid_id]
             if abs(value - 0.0) <= self.model.Params.IntFeasTol:
-                dam_soln.rejected_block_bids.append(bid_id)
+                if not bid.from_flexible:
+                    dam_soln.rejected_block_bids.append(bid_id)
             else:
-                dam_soln.accepted_block_bids.append(bid_id)
+                if bid.from_flexible:
+                    dam_soln.accepted_block_bids_from_flexible_bids.append(bid_id)
+                    flexible_bid_id = bid.exclusive_group_id
+                    dam_soln.accepted_flexible_bids.append(flexible_bid_id)
+                else:
+                    dam_soln.accepted_block_bids.append(bid_id)
+        dam_soln.rejected_flexible_bids = [
+            bid_id for bid_id in bid_id_2_flexible_bid if bid_id not in dam_soln.accepted_flexible_bids]
         dam_soln.market_clearing_prices = [x.X for x in self.model.getVars() if x.VarName.find('pi_') == 0]
+        dam_soln = generate_market_result_statistics(self.dam_data, dam_soln)
         return dam_soln
 
     def _get_solver_output(self):
