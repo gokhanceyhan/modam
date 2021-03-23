@@ -11,6 +11,29 @@ def calculate_block_bid_surplus(block_bid, market_clearing_prices):
     return sum([q * (block_bid.price - market_clearing_prices[t]) for t, q in enumerate(block_bid.quantities)])
 
 
+def calculate_block_bid_family_surplus(
+        accepted_block_bid_ids, block_bid, block_bid_id_2_child_block_bids, market_clearing_prices):
+    surplus = calculate_block_bid_surplus(block_bid, market_clearing_prices)
+    child_block_bids = block_bid_id_2_child_block_bids[block_bid.bid_id]
+    surplus += calculate_surplus_of_child_block_bids(
+        accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids, market_clearing_prices)
+    return surplus
+
+
+def calculate_surplus_of_child_block_bids(
+        accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids, market_clearing_prices):
+    surplus = 0.0
+    for block_bid_ in child_block_bids:
+        if block_bid_.bid_id not in accepted_block_bid_ids:
+            continue
+        surplus += calculate_block_bid_surplus(block_bid_, market_clearing_prices)
+        child_block_bids_ = block_bid_id_2_child_block_bids[block_bid_.bid_id]
+        if not child_block_bids_:
+            continue
+        surplus += calculate_surplus_of_child_block_bids(
+            accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids_, market_clearing_prices)
+    return surplus
+
 def interpolate(p_start, q_start, p_end, q_end, p=None, q=None):
     assert p is not None or q is not None, "either 'p' or 'q' must be given to determine the interpolated point"
     if p is not None:
@@ -28,20 +51,8 @@ def is_accepted_block_bid_pab(
     if surplus >= -dc.PAB_PRB_SURPLUS_TOL:
         return False
     child_block_bids = block_bid_id_2_child_block_bids[block_bid.bid_id]
-    
-    def calculate_surplus_of_child_block_bids(child_block_bids_):
-        surplus_ = 0.0
-        for block_bid_ in child_block_bids_:
-            if block_bid_.bid_id not in accepted_block_bid_ids:
-                continue
-            surplus_ += calculate_block_bid_surplus(block_bid_, market_clearing_prices)
-            child_block_bids__ = block_bid_id_2_child_block_bids[block_bid_.bid_id]
-            if not child_block_bids__:
-                continue
-            surplus_ += calculate_surplus_of_child_block_bids(child_block_bids__)
-        return surplus_
-
-    surplus += calculate_surplus_of_child_block_bids(child_block_bids)
+    surplus += calculate_surplus_of_child_block_bids(
+        accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids, market_clearing_prices)
     return surplus < -dc.PAB_PRB_SURPLUS_TOL
 
 
@@ -212,11 +223,12 @@ def create_gcut_for_demand_prb(
     return variables, coefficients, rhs
 
 
-def get_pab_info(block_bid, mcp):
+def get_pab_info(block_bid, mcp, block_bid_id_2_child_block_bids, accepted_block_bid_ids):
     """Returns (True, price_gap, loss) tuple if the accepted block bid is a PAB, otherwise (False, 0, 0)"""
     mcp_avg = sum([q * mcp[t] for t, q in enumerate(block_bid.quantities)]) / block_bid.total_quantity if \
         abs(block_bid.total_quantity) > 0 else 0.0
-    surplus = calculate_block_bid_surplus(block_bid, mcp)
+    surplus = calculate_block_bid_family_surplus(
+        accepted_block_bid_ids, block_bid, block_bid_id_2_child_block_bids, mcp)
     if surplus > -dc.PAB_PRB_SURPLUS_TOL:
         return False, 0, 0
     price_gap = block_bid.price - mcp_avg if block_bid.is_supply else mcp_avg - block_bid.price
@@ -237,6 +249,7 @@ def get_prb_info(block_bid, mcp):
 def generate_market_result_statistics(dam_data, dam_solution):
     """Generates the market result statistics, update the solution, and returns it"""
     dam_bids = dam_data.dam_bids
+    block_bid_id_2_child_block_bids = dam_data.block_bid_id_2_child_block_bids
     original_dam_bids = dam_data.dam_original_bids
     # find the set of PABs and PRBs
     pabs = []
@@ -252,7 +265,9 @@ def generate_market_result_statistics(dam_data, dam_solution):
 
     for bid_id in dam_solution.accepted_block_bids + dam_solution.accepted_block_bids_from_flexible_bids:
         bid = dam_bids.bid_id_2_block_bid[bid_id]
-        pab, price_gap_, loss_ = get_pab_info(bid, dam_solution.market_clearing_prices)
+        pab, price_gap_, loss_ = get_pab_info(
+            bid, dam_solution.market_clearing_prices, block_bid_id_2_child_block_bids, 
+            dam_solution.accepted_block_bids)
         if not pab:
             continue
         loss += loss_
