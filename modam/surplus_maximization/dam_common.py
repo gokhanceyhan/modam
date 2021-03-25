@@ -43,6 +43,7 @@ class DamSolution:
         self.accepted_block_bids = []
         self.accepted_block_bids_from_flexible_bids = []
         self.accepted_flexible_bids = []
+        self.accepted_mutually_exclusive_block_bid_group_ids = []
         self.average_pab_price_gap = average_pab_price_gap
         self.average_prb_price_gap = average_prb_price_gap
         self.is_valid = False
@@ -61,6 +62,7 @@ class DamSolution:
         self.quantity_prb_with_max_price_gap = quantity_prb_with_max_price_gap
         self.rejected_block_bids = []
         self.rejected_flexible_bids = []
+        self.rejected_mutually_exclusive_block_bid_group_ids = []
         self.total_surplus = None
 
     def _verify_no_pab(self, dam_data):
@@ -78,10 +80,13 @@ class DamSolution:
 
     def _verify_no_prb(self, dam_data):
         bid_id_2_block_bid = dam_data.dam_bids.bid_id_2_block_bid
+        exclusive_group_id_2_block_bid_ids = dam_data.exclusive_group_id_2_block_bid_ids
         self.is_valid = True
+        accepted_block_bid_ids = self.accepted_block_bids + self.accepted_block_bids_from_flexible_bids
         for bid_id in self.rejected_block_bids:
             bid = bid_id_2_block_bid[bid_id]
-            if is_rejected_block_bid_prb(bid, self.market_clearing_prices):
+            if is_rejected_block_bid_prb(
+                    bid, self.market_clearing_prices, accepted_block_bid_ids, exclusive_group_id_2_block_bid_ids):
                 self.is_valid = False
                 break
 

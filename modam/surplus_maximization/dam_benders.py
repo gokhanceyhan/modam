@@ -215,6 +215,7 @@ class BendersDecompositionGurobi(BendersDecomposition):
         # the block bids in 'dam_bids' include both original block bids and the block bids generated from flexible bids
         bid_id_2_block_bid = self.dam_data.dam_bids.bid_id_2_block_bid
         bid_id_2_flexible_bid = self.dam_data.dam_original_bids.bid_id_2_flexible_bid
+        exclusive_group_id_2_block_bid_ids = self.dam_data.exclusive_group_id_2_block_bid_ids
         dam_soln = DamSolution()
         dam_soln.total_surplus = mp.fixed.ObjVal
         y = mp.fixed.getAttr('X', mp.bid_id_2_bbidvar)
@@ -230,11 +231,18 @@ class BendersDecompositionGurobi(BendersDecomposition):
                 if bid.from_flexible:
                     dam_soln.accepted_block_bids_from_flexible_bids.append(bid_id)
                     flexible_bid_id = bid.exclusive_group_id
-                    dam_soln.accepted_flexible_bids.append(flexible_bid_id)
+                    if flexible_bid_id not in dam_soln.accepted_flexible_bids:
+                        dam_soln.accepted_flexible_bids.append(flexible_bid_id)
+                elif bid.exclusive_group_id is not None and \
+                        bid.exclusive_group_id not in dam_soln.accepted_mutually_exclusive_block_bid_group_ids:
+                    dam_soln.accepted_mutually_exclusive_block_bid_group_ids.append(bid.exclusive_group_id)
                 else:
                     dam_soln.accepted_block_bids.append(bid_id)
         dam_soln.rejected_flexible_bids = [
             bid_id for bid_id in bid_id_2_flexible_bid if bid_id not in dam_soln.accepted_flexible_bids]
+        dam_soln.rejected_mutually_exclusive_block_bid_group_ids = [
+            group_id for group_id in exclusive_group_id_2_block_bid_ids if group_id not in 
+            dam_soln.accepted_mutually_exclusive_block_bid_group_ids]
         post_problem_result = None
         if use_post_processing_problem:
             post_problem = PostProblemGurobiModel(self.dam_data, self._working_dir)
@@ -511,14 +519,16 @@ class CallbackGurobi:
     def _generate_gcuts(model, accepted_block_bids, rejected_block_bids):
         bid_id_2_block_bid = model._dam_data.dam_bids.bid_id_2_block_bid
         block_bid_id_2_child_block_bids = model._dam_data.block_bid_id_2_child_block_bids
+        exclusive_group_id_2_block_bid_ids = model._dam_data.exclusive_group_id_2_block_bid_ids
         bid_id_2_bbidvar = model._bid_id_2_bbidvar
         market_clearing_prices = CallbackGurobi._find_market_clearing_prices(
             model, accepted_block_bids, rejected_block_bids)
         pabs = du.find_pabs(
             market_clearing_prices, accepted_block_bids, bid_id_2_block_bid, block_bid_id_2_child_block_bids) \
             if model._prob is ProblemType.NoPab else []
-        prbs = du.find_prbs(market_clearing_prices, rejected_block_bids, bid_id_2_block_bid) \
-            if model._prob is ProblemType.NoPrb else []
+        prbs = du.find_prbs(
+            market_clearing_prices, rejected_block_bids, bid_id_2_block_bid, accepted_block_bids, 
+            exclusive_group_id_2_block_bid_ids) if model._prob is ProblemType.NoPrb else []
         for pab in pabs:
             variables, coefficients, rhs = du.create_gcut_for_pab(
                 pab, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
@@ -528,7 +538,8 @@ class CallbackGurobi:
             model._num_of_user_cuts += 1
         for prb in prbs:
             variables, coefficients, rhs = du.create_gcut_for_prb(
-                prb, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar)
+                prb, accepted_block_bids, rejected_block_bids, bid_id_2_block_bid, bid_id_2_bbidvar, 
+                exclusive_group_id_2_block_bid_ids)
             expr = grb.LinExpr(0.0)
             expr.addTerms(coefficients, variables)
             model.cbLazy(expr >= rhs)

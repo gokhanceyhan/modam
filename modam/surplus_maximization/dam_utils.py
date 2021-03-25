@@ -56,8 +56,22 @@ def is_accepted_block_bid_pab(
     return surplus < -dc.PAB_PRB_SURPLUS_TOL
 
 
-def is_rejected_block_bid_prb(block_bid, market_clearing_prices):
-    return calculate_block_bid_surplus(block_bid, market_clearing_prices) > dc.PAB_PRB_SURPLUS_TOL
+def is_rejected_block_bid_prb(
+        block_bid, market_clearing_prices, accepted_block_bid_ids, exclusive_group_id_2_block_bid_ids):
+    # child bids do not count as prb even if their parent bids are accepted (Turkish market rule)
+    if block_bid.link is not None:
+        return False
+    surplus = calculate_block_bid_surplus(block_bid, market_clearing_prices)
+    if surplus <= dc.PAB_PRB_SURPLUS_TOL:
+        return False
+    # check if another bid is accepted from the same group (e.g. mutually exclusive block bids and flexible bids)
+    exclusive_group_id = block_bid.exclusive_group_id
+    mutually_exclusive_block_bid_ids = exclusive_group_id_2_block_bid_ids[exclusive_group_id] if exclusive_group_id \
+        is not None else []
+    # if another bid from the same group is accepted, then this bid is not PRB
+    if set(mutually_exclusive_block_bid_ids).intersection(accepted_block_bid_ids):
+        return False
+    return True
 
 
 def calculate_bigm_for_block_bid_loss(block_bid, max_price=2000, min_price=0):
@@ -90,11 +104,15 @@ def find_pabs(market_clearing_prices, accepted_block_bid_ids, bid_id_2_block_bid
     return pabs
 
 
-def find_prbs(market_clearing_prices, rejected_block_bid_ids, bid_id_2_block_bid):
+def find_prbs(
+        market_clearing_prices, rejected_block_bid_ids, bid_id_2_block_bid, accepted_block_bid_ids, 
+        exclusive_group_id_2_block_bid_ids):
     prbs = []
     for rejected_block_bid_id in rejected_block_bid_ids:
         rejected_block_bid = bid_id_2_block_bid[rejected_block_bid_id]
-        if is_rejected_block_bid_prb(rejected_block_bid, market_clearing_prices):
+        if is_rejected_block_bid_prb(
+                rejected_block_bid, market_clearing_prices, accepted_block_bid_ids, 
+                exclusive_group_id_2_block_bid_ids):
             prbs.append(rejected_block_bid)
     return prbs
 
@@ -109,13 +127,17 @@ def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid
     return variables, coefficients, rhs
 
 
-def create_gcut_for_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
+def create_gcut_for_prb(
+        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+        exclusive_group_id_2_block_bid_ids):
     if prb.is_supply:
         variables, coefficients, rhs = create_gcut_for_supply_prb(
-            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
+            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+            exclusive_group_id_2_block_bid_ids)
     else:
         variables, coefficients, rhs = create_gcut_for_demand_prb(
-            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
+            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+            exclusive_group_id_2_block_bid_ids)
     return variables, coefficients, rhs
 
 
@@ -146,12 +168,21 @@ def create_gcut_for_supply_pab(
 
 
 def create_gcut_for_supply_prb(
-        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-    variables = [bid_id_2_bbid_var[prb.bid_id]]
-    coefficients = [1]
+        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+        exclusive_group_id_2_block_bid_ids):
+    exclusive_group_id = prb.exclusive_group_id
+    mutually_exclusive_block_bid_ids = exclusive_group_id_2_block_bid_ids[exclusive_group_id] if exclusive_group_id \
+        is not None else []
+    if mutually_exclusive_block_bid_ids:
+        variables = [bid_id_2_bbid_var[bid_id] for bid_id in mutually_exclusive_block_bid_ids]
+        coefficients = [1] * len(variables)
+    else:
+        variables = [bid_id_2_bbid_var[prb.bid_id]]
+        coefficients = [1]
     rhs = 1
     rejected_supply_block_bid_ids = [
-        bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id and bid_id_2_block_bid[bid_id].is_supply]
+        bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id and bid_id_2_block_bid[bid_id].is_supply 
+        and bid_id not in mutually_exclusive_block_bid_ids]
     accepted_demand_block_bid_ids = [
         bid_id for bid_id in accepted_block_bid_ids if bid_id != prb.bid_id and 
         not bid_id_2_block_bid[bid_id].is_supply]
@@ -198,13 +229,21 @@ def create_gcut_for_demand_pab(
 
 
 def create_gcut_for_demand_prb(
-        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-    variables = [bid_id_2_bbid_var[prb.bid_id]]
-    coefficients = [1]
+        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+        exclusive_group_id_2_block_bid_ids):
+    exclusive_group_id = prb.exclusive_group_id
+    mutually_exclusive_block_bid_ids = exclusive_group_id_2_block_bid_ids[exclusive_group_id] if exclusive_group_id \
+        is not None else []
+    if mutually_exclusive_block_bid_ids:
+        variables = [bid_id_2_bbid_var[bid_id] for bid_id in mutually_exclusive_block_bid_ids]
+        coefficients = [1] * len(variables)
+    else:
+        variables = [bid_id_2_bbid_var[prb.bid_id]]
+        coefficients = [1]
     rhs = 1
     rejected_demand_block_bid_ids = [
         bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id and 
-        not bid_id_2_block_bid[bid_id].is_supply]
+        not bid_id_2_block_bid[bid_id].is_supply and bid_id not in mutually_exclusive_block_bid_ids]
     accepted_supply_block_bid_ids = [
         bid_id for bid_id in accepted_block_bid_ids if bid_id != prb.bid_id and bid_id_2_block_bid[bid_id].is_supply]
     # find intersecting rejected demand block bids
@@ -247,7 +286,9 @@ def get_prb_info(block_bid, mcp):
 
 
 def generate_market_result_statistics(dam_data, dam_solution):
-    """Generates the market result statistics, update the solution, and returns it"""
+    """Generates the market result statistics, update the solution, and returns it
+    
+    'pab/prb' related statistics (e.g. price gap) does not cover the flexible bids and mutually exclusive block bids"""
     dam_bids = dam_data.dam_bids
     block_bid_id_2_child_block_bids = dam_data.block_bid_id_2_child_block_bids
     original_dam_bids = dam_data.dam_original_bids
@@ -281,23 +322,47 @@ def generate_market_result_statistics(dam_data, dam_solution):
             pab_with_max_price_gap = (abs(bid.total_quantity) / bid.num_period, bid.num_period, price_gap_)
     average_pab_price_gap = (average_pab_price_gap / len(pabs)) if pabs else None
 
+    prf_bid_id_2_missed_surplus = {}
+    exclusive_group_id_2_missed_surplus = {}
     for bid_id in dam_solution.rejected_block_bids:
         bid = dam_bids.bid_id_2_block_bid[bid_id]
+        if bid.link is not None:
+            continue
         prb, price_gap_, missed_surplus_ = get_prb_info(bid, dam_solution.market_clearing_prices)
         if not prb:
             continue
-        if bid.from_flexible:
-            flexible_bid_id = bid.exclusive_group_id
-            if flexible_bid_id in dam_solution.rejected_flexible_bids and flexible_bid_id not in prfs:
-                prfs.append(flexible_bid_id)
+        exclusive_group_id = bid.exclusive_group_id
+        if exclusive_group_id is not None:
+            if bid.from_flexible:
+                flexible_bid_id = bid.exclusive_group_id
+                if flexible_bid_id in dam_solution.rejected_flexible_bids:
+                    if flexible_bid_id not in prfs:
+                        prfs.append(flexible_bid_id)
+                        prf_bid_id_2_missed_surplus[flexible_bid_id] = missed_surplus_
+                    else:
+                        # missed surplus of a prf is the max of the missed surpluses corresponding to the single-period 
+                        # child block bids generated from the flexible bid
+                        prf_bid_id_2_missed_surplus[flexible_bid_id] = max(
+                            prf_bid_id_2_missed_surplus[flexible_bid_id], missed_surplus_)
+            else:
+                exclusive_group_id = bid.exclusive_group_id
+                if exclusive_group_id in dam_solution.rejected_mutually_exclusive_block_bid_group_ids:
+                    if exclusive_group_id in exclusive_group_id_2_missed_surplus:
+                        exclusive_group_id_2_missed_surplus[exclusive_group_id] = max(
+                            exclusive_group_id_2_missed_surplus[exclusive_group_id], missed_surplus_)
+                    else:
+                        # missed surplus of a mutually exclusive block bid group is the max of the missed surpluses 
+                        # corresponding to the individual block bids in the group
+                        exclusive_group_id_2_missed_surplus[exclusive_group_id] = missed_surplus_    
             continue
-        else:
-            prbs.append(bid_id)
-            missed_surplus += missed_surplus_
+        prbs.append(bid_id)
+        missed_surplus += missed_surplus_
         average_prb_price_gap += price_gap_
         if not prb_with_max_price_gap or prb_with_max_price_gap[2] < price_gap_:
             prb_with_max_price_gap = (abs(bid.total_quantity) / bid.num_period, bid.num_period, price_gap_)
     average_prb_price_gap = (average_prb_price_gap / len(prbs)) if prbs else None
+    missed_surplus += sum(prf_bid_id_2_missed_surplus.values())
+    missed_surplus += sum(exclusive_group_id_2_missed_surplus.values())
 
     # update the solution
     dam_solution.loss = loss
