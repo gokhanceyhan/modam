@@ -37,7 +37,7 @@ class DamSolverCplex(DamSolver):
     def _solve_primal_dual_problem(self):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp', self._working_dir)
         prob_name = dam_pd.create_model()
-        solver = dpd.PrimalDualCplexSolver(prob_name, self.solver_params, self._working_dir)
+        solver = dpd.PrimalDualCplexSolver(self.dam_data, prob_name, self.solver_params, self._working_dir)
         dam_output = solver.solve()
         return dam_output
 
@@ -60,7 +60,7 @@ class DamSolverGurobi(DamSolver):
     def _solve_primal_dual_problem(self):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp', self._working_dir)
         prob_name = dam_pd.create_model()
-        solver = dpd.PrimalDualGurobiSolver(prob_name, self.solver_params, self._working_dir)
+        solver = dpd.PrimalDualGurobiSolver(self.dam_data, prob_name, self.solver_params, self._working_dir)
         dam_output = solver.solve()
         return dam_output
 
@@ -87,7 +87,7 @@ class DamSolverScip(DamSolver):
     def _solve_primal_dual_problem(self):
         dam_pd = dpd.PrimalDualModel(self.prob_type, self.dam_data, 'e-smilp', self._working_dir)
         prob_name = dam_pd.create_model()
-        solver = dpd.PrimalDualScipSolver(prob_name, self.solver_params, self._working_dir)
+        solver = dpd.PrimalDualScipSolver(self.dam_data, prob_name, self.solver_params, self._working_dir)
         dam_output = solver.solve()
         return dam_output
 

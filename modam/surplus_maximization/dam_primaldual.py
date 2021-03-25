@@ -7,9 +7,9 @@ from pyscipopt import Model
 
 from modam.surplus_maximization.dam_common import DamSolution, DamSolverOutput, OptimizationStats, OptimizationStatus, \
     ProblemType
-from modam.surplus_maximization.dam_input import BidType
+from modam.surplus_maximization.dam_input import BidType, ConstraintType, DamData
 from modam.surplus_maximization.dam_utils import calculate_bigm_for_block_bid_loss, \
-    calculate_bigm_for_block_bid_missed_surplus
+    calculate_bigm_for_block_bid_missed_surplus, generate_market_result_statistics
 
 
 class PrimalDualModel:
@@ -23,37 +23,51 @@ class PrimalDualModel:
         self.bid_id_2_bbidvar = {}
         self.period_2_balance_con = {}
         self.period_2_pi = {}
-        self._working_dir = working_dir
+        self.block_bid_constraint_dual_vars = []
         self.loss_expr = grb.LinExpr(0.0)
         self.missed_surplus_expr = grb.LinExpr(0.0)
-        self.surplus_expr = grb.LinExpr(0.0)
+        self.surplus_expr = None
+        self._working_dir = working_dir
 
     def create_model(self):
         self._create_variables()
         self._create_obj_function()
         self._create_constraints()
         self._write_model()
-        return os.path.join(self._working_dir, self.prob_name + '.mps')
+        return os.path.join(self._working_dir, self.prob_name + '.lp')
 
     def _write_model(self):
-        self.model.write(os.path.join(self._working_dir, self.prob_name + '.mps'))
+        self.model.write(os.path.join(self._working_dir, self.prob_name + '.lp'))
 
     def _create_variables(self):
         self._create_hbidvars()
         self._create_bbidvars()
         self._create_price_variables()
+        self._create_block_bid_constraint_dual_vars()
 
     def _create_constraints(self):
         self._create_balance_constraints()
+        self._create_block_bid_constraints()
         self._create_dual_feasibility_constraints()
         self._restrict_loss_variables()
         self._create_strong_duality_constraint()
         self._create_cuts_for_identical_bids()
 
     def _create_hbidvars(self):
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
+        # step hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
             step_id_2_sbidvar = {}
             for step_id in hourly_bid.step_id_2_simple_bid.keys():
+                pvar = self.model.addVar(
+                    vtype=grb.GRB.CONTINUOUS, name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
+                dvar = self.model.addVar(
+                    vtype=grb.GRB.CONTINUOUS, name='s_' + str(bid_id) + '_' + str(step_id), lb=0)
+                step_id_2_sbidvar[step_id] = (pvar, dvar)
+            self.bid_id_2_step_id_2_sbidvar[bid_id] = step_id_2_sbidvar
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            step_id_2_sbidvar = {}
+            for step_id in hourly_bid.step_id_2_interpolated_bid.keys():
                 pvar = self.model.addVar(
                     vtype=grb.GRB.CONTINUOUS, name='x_' + str(bid_id) + '_' + str(step_id), lb=0, ub=1)
                 dvar = self.model.addVar(
@@ -74,86 +88,153 @@ class PrimalDualModel:
             self.bid_id_2_bbidvar[bid_id] = (pvar, dvar, lvar, mvar)
 
     def _create_price_variables(self):
-        for period in range(self.dam_data.number_of_periods):
+        for period in range(DamData.NUM_PERIODS):
             var = self.model.addVar(
-                vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=self.dam_data.min_price, 
-                ub=self.dam_data.max_price)
-            self.period_2_pi[period+1] = var
+                vtype=grb.GRB.CONTINUOUS, name='pi_' + str(period+1), lb=DamData.MIN_PRICE, ub=DamData.MAX_PRICE)
+            self.period_2_pi[period + 1] = var
+
+    def _create_block_bid_constraint_dual_vars(self):
+        num_constraints = len(self.dam_data.block_bid_constraints_rhs)
+        for cidx in range(num_constraints):
+            var = self.model.addVar(vtype=grb.GRB.CONTINUOUS, name=f'u_{cidx}', lb=0)
+            self.block_bid_constraint_dual_vars.append(var)
 
     def _create_obj_function(self):
         lin_expr = grb.LinExpr(0.0)
+        quad_expr = grb.QuadExpr(0.0)
         # set coefficients for simple bids
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
-                lin_expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], step[0] * step[1])
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
+                lin_expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], simple_bid.p * simple_bid.q)
+        # set coefficients for interpolated bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                pvar = self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0]
+                lin_expr.add(pvar, interpolated_bid.p_start * interpolated_bid.q)
+                quad_expr.add(
+                    pvar * pvar, 0.5 * (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
         # set coefficients for block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
-            lin_expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.num_period * block_bid.price * block_bid.quantity)
-        self.model.setObjective(lin_expr, grb.GRB.MAXIMIZE)
-        self.surplus_expr.add(lin_expr)
+            lin_expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.price * block_bid.total_quantity)
+        obj_expr = lin_expr + quad_expr
+        self.model.setObjective(obj_expr, grb.GRB.MAXIMIZE)
+        self.surplus_expr = obj_expr
 
     def _create_balance_constraints(self):
         period_2_expr = {}
-        for period in range(1, self.dam_data.number_of_periods + 1, 1):
+        for period in range(1, DamData.NUM_PERIODS + 1, 1):
             expr = grb.LinExpr(0.0)
             period_2_expr[period] = expr
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
-                expr = period_2_expr[hourly_bid.period]
-                expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], step[1])
+        # step hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            expr = period_2_expr[hourly_bid.period]
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
+                expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], simple_bid.q)
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            expr = period_2_expr[hourly_bid.period]
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                expr.add(self.bid_id_2_step_id_2_sbidvar[bid_id][step_id][0], interpolated_bid.q)
+        # block bids
         for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
             for t in range(block_bid.period, block_bid.period + block_bid.num_period, 1):
                 expr = period_2_expr[t]
-                expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.quantity)
+                expr.add(self.bid_id_2_bbidvar[bid_id][0], block_bid.quantity(t))
         for period, expr in period_2_expr.items():
             constraint = self.model.addConstr(expr, grb.GRB.EQUAL, 0.0, 'balance_' + str(period))
             self.period_2_balance_con[period] = constraint
+
+    def _create_block_bid_constraints(self):
+        """Creates the constraints for the linked block bids, mutually exclusive block bids and flexible bids"""
+        constraints = self.dam_data.block_bid_constraints_matrix
+        rhs = self.dam_data.block_bid_constraints_rhs
+        vars_ = [self.bid_id_2_bbidvar[bid_id][0] for bid_id in self.dam_data.block_bid_constraints_bid_ids]
+        types = self.dam_data.block_bid_constraints_types
+        constraint_type_2_constraint_sense = {
+            ConstraintType.EQUAL_TO: grb.GRB.EQUAL,
+            ConstraintType.GREATER_THAN_EQUAL_TO: grb.GRB.GREATER_EQUAL,
+            ConstraintType.LESS_THAN_EQUAL_TO: grb.GRB.LESS_EQUAL}
+        for index, (constraint, rhs_, type_) in enumerate(zip(constraints, rhs, types)):
+            sense = constraint_type_2_constraint_sense[type_]
+            name = f"block_bid_constraints_{index}"
+            self.model.addConstr(grb.quicksum([c * var for c, var in zip(constraint, vars_)]), sense, rhs_, name)
 
     def _create_dual_feasibility_constraints(self):
         bid_id_2_step_id_2_sbidvar = self.bid_id_2_step_id_2_sbidvar
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         model = self.model
         period_2_pi = self.period_2_pi
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        # step hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 expr = grb.LinExpr(0.0)
                 svar = bid_id_2_step_id_2_sbidvar[bid_id][step_id][1]
                 pi = period_2_pi[hourly_bid.period]
-                p = step[0]
-                q = step[1]
+                p = simple_bid.p
+                q = simple_bid.q
                 expr.addTerms([1, q], [svar, pi])
-                model.addConstr(expr, grb.GRB.GREATER_EQUAL, p*q, 'dual_' + str(bid_id) + '_' + str(step_id))
-
-        for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
+                model.addConstr(expr, grb.GRB.GREATER_EQUAL, p * q, 'dual_' + str(bid_id) + '_' + str(step_id))
+        # piecewise hourly bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                expr = grb.LinExpr(0.0)
+                pvar, svar = bid_id_2_step_id_2_sbidvar[bid_id][step_id]
+                pi = period_2_pi[hourly_bid.period]
+                p_start = interpolated_bid.p_start
+                p_end = interpolated_bid.p_end
+                q = interpolated_bid.q
+                expr.addTerms([1, q, -(p_end - p_start) * q], [svar, pi, pvar])
+                model.addConstr(expr, grb.GRB.GREATER_EQUAL, p_start * q, 'dual_' + str(bid_id) + '_' + str(step_id))
+        # block bids
+        bid_id_2_block_bid = self.dam_data.dam_bids.bid_id_2_block_bid
+        block_bid_ids = self.dam_data.block_bid_constraints_bid_ids
+        constraints = self.dam_data.block_bid_constraints_matrix
+        u = self.block_bid_constraint_dual_vars
+        for var_idx, bid_id in enumerate(block_bid_ids):
+            block_bid = bid_id_2_block_bid[bid_id]
             expr = grb.LinExpr(0.0)
             y, s, l, m = bid_id_2_bbidvar[bid_id]
-            p = block_bid.num_period * [block_bid.price]
-            q = block_bid.num_period * [block_bid.quantity]
-            pi = list(period_2_pi.values())
-            pi = pi[block_bid.period-1:block_bid.period+block_bid.num_period-1]
-            rhs = sum([i*j for i, j in zip(p, q)])
+            p = [block_bid.price] * DamData.NUM_PERIODS
+            q = block_bid.quantities
+            pi = [period_2_pi[t + 1] for t in range(DamData.NUM_PERIODS)]
+            rhs = sum([i * j for i, j in zip(p, q)])
             expr.addTerms([1, -1, 1], [s, l, m])
             expr.addTerms(q, pi)
+            # add terms for the 'u' variables (dual vars of block bid constraints)
+            coeffs = [con[var_idx] for con in constraints]
+            expr.addTerms(coeffs, u)
             model.addConstr(expr, grb.GRB.GREATER_EQUAL, rhs, 'dual_' + str(bid_id))
 
     def _create_strong_duality_constraint(self):
         bid_id_2_step_id_2_sbidvar = self.bid_id_2_step_id_2_sbidvar
         bid_id_2_bbidvar = self.bid_id_2_bbidvar
         model = self.model
-
         lin_expr = grb.LinExpr(0.0)
+        quad_expr = grb.QuadExpr(0.0)
         # set coefficients for simple bids
-        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_hourly_bid.items():
-            for step_id, step in hourly_bid.step_id_2_simple_bid.items():
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_step_hourly_bid.items():
+            for step_id, simple_bid in hourly_bid.step_id_2_simple_bid.items():
                 pvar, dvar = bid_id_2_step_id_2_sbidvar[bid_id][step_id]
-                lin_expr.add(pvar, step[0] * step[1])
+                lin_expr.add(pvar, simple_bid.p * simple_bid.q)
+                lin_expr.add(dvar, -1)
+        # set coefficients for interpolated bids
+        for bid_id, hourly_bid in self.dam_data.dam_bids.bid_id_2_piecewise_hourly_bid.items():
+            for step_id, interpolated_bid in hourly_bid.step_id_2_interpolated_bid.items():
+                pvar, dvar = bid_id_2_step_id_2_sbidvar[bid_id][step_id]
+                lin_expr.add(pvar, interpolated_bid.p_start * interpolated_bid.q)
+                quad_expr.add(pvar * pvar, (interpolated_bid.p_end - interpolated_bid.p_start) * interpolated_bid.q)
                 lin_expr.add(dvar, -1)
         # set coefficients for block bids
-        for bid_id, block_bid in self.dam_data.dam_bids.bid_id_2_block_bid.items():
+        bid_id_2_block_bid = self.dam_data.dam_bids.bid_id_2_block_bid
+        rhs = self.dam_data.block_bid_constraints_rhs
+        u = self.block_bid_constraint_dual_vars
+        for bid_id, block_bid in bid_id_2_block_bid.items():
             y, s, l, m = bid_id_2_bbidvar[bid_id]
-            lin_expr.add(y, block_bid.num_period * block_bid.price * block_bid.quantity)
+            lin_expr.add(y, block_bid.price * block_bid.total_quantity)
             lin_expr.addTerms([-1, 1], [s, l])
-        model.addConstr(lin_expr, grb.GRB.GREATER_EQUAL, 0.0, 'sd')
+            # add terms for the 'u' variables (dual vars of block bid constraints)
+            lin_expr.addTerms(-rhs, u)
+        model.addConstr(lin_expr + quad_expr, grb.GRB.GREATER_EQUAL, 0.0, 'sd')
 
     def _create_cuts_for_identical_bids(self):
         """Sets a complete ordering for the acceptance of identical bid sets
@@ -179,9 +260,9 @@ class PrimalDualModel:
             lexpr = grb.LinExpr(0.0)
             y, s, l, m = bid_id_2_bbidvar[bid_id]
             l_bigm = calculate_bigm_for_block_bid_loss(
-                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+                block_bid, max_price=DamData.MAX_PRICE, min_price=DamData.MIN_PRICE)
             m_bigm = calculate_bigm_for_block_bid_missed_surplus(
-                block_bid, max_price=self.dam_data.max_price, min_price=self.dam_data.min_price)
+                block_bid, max_price=DamData.MAX_PRICE, min_price=DamData.MIN_PRICE)
             mexpr.addTerms([1, m_bigm], [m, y])
             lexpr.addTerms([1, -l_bigm], [l, y])
             model.addConstr(mexpr, grb.GRB.LESS_EQUAL, m_bigm, 'missed_surplus_' + str(bid_id))
@@ -192,7 +273,8 @@ class PrimalDualModel:
 
 class PrimalDualSolver(object):
 
-    def __init__(self, prob_name, solver_params, working_dir):
+    def __init__(self, dam_data, prob_name, solver_params, working_dir):
+        self.dam_data = dam_data
         self.prob_name = prob_name
         self.solver_params = solver_params
         self._working_dir = working_dir
@@ -216,8 +298,8 @@ class PrimalDualSolver(object):
 
 class PrimalDualGurobiSolver(PrimalDualSolver):
 
-    def __init__(self, prob_name, solver_params, working_dir):
-        PrimalDualSolver.__init__(self, prob_name, solver_params, working_dir)
+    def __init__(self, dam_data, prob_name, solver_params, working_dir):
+        PrimalDualSolver.__init__(self, dam_data, prob_name, solver_params, working_dir)
         self.model = grb.read(prob_name)
 
     def solve(self):
@@ -230,20 +312,34 @@ class PrimalDualGurobiSolver(PrimalDualSolver):
         self.model.Params.MIPGap = self.solver_params.rel_gap
         self.model.Params.TimeLimit = self.solver_params.time_limit
         self.model.Params.Threads = self.solver_params.num_threads
+        # we tighten the constraint feas tol since the strong duality constraint takes large values
+        self.model.Params.FeasibilityTol = 1e-9
 
     def _get_best_solution(self):
+        bid_id_2_block_bid = self.dam_data.dam_bids.bid_id_2_block_bid
+        bid_id_2_flexible_bid = self.dam_data.dam_original_bids.bid_id_2_flexible_bid
         # fill solution
         dam_soln = DamSolution()
-        dam_soln.total_surplus = -1 * self.model.ObjVal
+        dam_soln.total_surplus = self.model.ObjVal
         varname_2_bbidvar = {x.VarName: x for x in self.model.getVars() if x.VarName.find('y_') == 0}
         y = self.model.getAttr('X', varname_2_bbidvar)
         for name, value in y.items():
             bid_id = name[2:]
+            bid = bid_id_2_block_bid[bid_id]
             if abs(value - 0.0) <= self.model.Params.IntFeasTol:
-                dam_soln.rejected_block_bids.append(bid_id)
+                if not bid.from_flexible:
+                    dam_soln.rejected_block_bids.append(bid_id)
             else:
-                dam_soln.accepted_block_bids.append(bid_id)
+                if bid.from_flexible:
+                    dam_soln.accepted_block_bids_from_flexible_bids.append(bid_id)
+                    flexible_bid_id = bid.exclusive_group_id
+                    dam_soln.accepted_flexible_bids.append(flexible_bid_id)
+                else:
+                    dam_soln.accepted_block_bids.append(bid_id)
+        dam_soln.rejected_flexible_bids = [
+            bid_id for bid_id in bid_id_2_flexible_bid if bid_id not in dam_soln.accepted_flexible_bids]
         dam_soln.market_clearing_prices = [x.X for x in self.model.getVars() if x.VarName.find('pi_') == 0]
+        dam_soln = generate_market_result_statistics(self.dam_data, dam_soln)
         return dam_soln
 
     def _get_solver_output(self):
@@ -293,7 +389,7 @@ class PrimalDualCplexSolver(PrimalDualSolver):
         solution = self.model.solution
         # fill dam solution object
         dam_soln = DamSolution()
-        dam_soln.total_surplus = -1 * solution.get_objective_value()
+        dam_soln.total_surplus = solution.get_objective_value()
         bbid_varnames = [name for name in self.model.variables.get_names() if name.find('y_') == 0]
         varname_2_y = {name: solution.get_values(name) for name in bbid_varnames}
         for name, y in varname_2_y.items():
@@ -350,7 +446,7 @@ class PrimalDualScipSolver(PrimalDualSolver):
         model = self.model
         # fill dam solution object
         dam_soln = DamSolution()
-        dam_soln.total_surplus = -1 * model.getObjVal()
+        dam_soln.total_surplus = model.getObjVal()
         varname_2_bbidvar = {x.name: x for x in model.getVars() if x.name.find('y_') == 0}
         varname_2_y = {name: model.getVal(var) for name, var in varname_2_bbidvar.items()}
         for name, value in varname_2_y.items():

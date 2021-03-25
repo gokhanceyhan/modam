@@ -91,7 +91,7 @@ class DamRunner(object):
         output = dam_solver.solve()
         solution = output.dam_solution()
         if solution is not None:
-            solution.verify(self._problem_type, dam_data.dam_bids)
+            solution.verify(self._problem_type, dam_data)
         # create the output
         self._output = output
 

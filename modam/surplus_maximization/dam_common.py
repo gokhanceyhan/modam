@@ -33,12 +33,17 @@ class DamSolution:
             max_prb_price_gap=None, 
             missed_surplus=0, 
             num_pab=0,
+            num_paf=0,
             num_periods_for_pab_with_max_price_gap=None,
             num_periods_for_prb_with_max_price_gap=None,
             num_prb=0,
+            num_prf=0,
             quantity_pab_with_max_price_gap=None, 
             quantity_prb_with_max_price_gap=None):
         self.accepted_block_bids = []
+        self.accepted_block_bids_from_flexible_bids = []
+        self.accepted_flexible_bids = []
+        self.accepted_mutually_exclusive_block_bid_group_ids = []
         self.average_pab_price_gap = average_pab_price_gap
         self.average_prb_price_gap = average_prb_price_gap
         self.is_valid = False
@@ -48,35 +53,48 @@ class DamSolution:
         self.max_prb_price_gap = max_prb_price_gap
         self.missed_surplus = missed_surplus
         self.num_pab = num_pab
+        self.num_paf = num_paf
         self.num_periods_for_pab_with_max_price_gap = num_periods_for_pab_with_max_price_gap
         self.num_periods_for_prb_with_max_price_gap = num_periods_for_prb_with_max_price_gap
         self.num_prb = num_prb
+        self.num_prf = num_prf
         self.quantity_pab_with_max_price_gap = quantity_pab_with_max_price_gap
         self.quantity_prb_with_max_price_gap = quantity_prb_with_max_price_gap
         self.rejected_block_bids = []
+        self.rejected_flexible_bids = []
+        self.rejected_mutually_exclusive_block_bid_group_ids = []
         self.total_surplus = None
 
-    def _verify_no_pab(self, dam_bids):
+    def _verify_no_pab(self, dam_data):
+        bid_id_2_block_bid = dam_data.dam_bids.bid_id_2_block_bid
+        block_bid_id_2_child_block_bids = dam_data.block_bid_id_2_child_block_bids
         self.is_valid = True
-        for bid_id in self.accepted_block_bids:
-            bid = dam_bids.bid_id_2_block_bid[bid_id]
-            if is_accepted_block_bid_pab(bid, self.market_clearing_prices):
+        accepted_block_bid_ids = self.accepted_block_bids + self.accepted_block_bids_from_flexible_bids
+        for bid_id in accepted_block_bid_ids:
+            # the following block bid dict includes both original block bids and the ones generated from flexible bids
+            bid = bid_id_2_block_bid[bid_id]
+            if is_accepted_block_bid_pab(
+                    bid, self.market_clearing_prices, block_bid_id_2_child_block_bids, accepted_block_bid_ids):
                 self.is_valid = False
                 break
 
-    def _verify_no_prb(self, dam_bids):
+    def _verify_no_prb(self, dam_data):
+        bid_id_2_block_bid = dam_data.dam_bids.bid_id_2_block_bid
+        exclusive_group_id_2_block_bid_ids = dam_data.exclusive_group_id_2_block_bid_ids
         self.is_valid = True
+        accepted_block_bid_ids = self.accepted_block_bids + self.accepted_block_bids_from_flexible_bids
         for bid_id in self.rejected_block_bids:
-            bid = dam_bids.bid_id_2_block_bid[bid_id]
-            if is_rejected_block_bid_prb(bid, self.market_clearing_prices):
+            bid = bid_id_2_block_bid[bid_id]
+            if is_rejected_block_bid_prb(
+                    bid, self.market_clearing_prices, accepted_block_bid_ids, exclusive_group_id_2_block_bid_ids):
                 self.is_valid = False
                 break
 
-    def verify(self, problem_type, dam_bids):
+    def verify(self, problem_type, dam_data):
         if problem_type == ProblemType.NoPab:
-            self._verify_no_pab(dam_bids)
+            self._verify_no_pab(dam_data)
         elif problem_type == ProblemType.NoPrb:
-            self._verify_no_prb(dam_bids)
+            self._verify_no_prb(dam_data)
         elif problem_type == ProblemType.Unrestricted:
             self.is_valid = True
 

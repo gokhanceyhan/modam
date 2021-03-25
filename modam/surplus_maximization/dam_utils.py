@@ -7,77 +7,85 @@ import os
 import modam.surplus_maximization.dam_constants as dc
 
 
-def create_simple_bids_from_hourly_bid(hourly_bid):
-    step_id_2_simple_bid = {}
-    count = 1
-    prev_qnt = 0
-    if hourly_bid.price_quantity_pairs[0][1] <= 0:
-        # supply bid
-        for price, quantity in hourly_bid.price_quantity_pairs:
-            step_id_2_simple_bid[count] = (price, quantity - prev_qnt)
-            prev_qnt = quantity
-            count += 1
-    elif hourly_bid.price_quantity_pairs[len(hourly_bid.price_quantity_pairs)-1][1] >= 0:
-        # demand bid
-        for price, quantity in reversed(hourly_bid.price_quantity_pairs):
-            step_id_2_simple_bid[count] = (price, quantity - prev_qnt)
-            prev_qnt = quantity
-            count += 1
-    else:
-        prev_qnt = hourly_bid.price_quantity_pairs[0][1]
-        prev_prc = hourly_bid.price_quantity_pairs[0][0]
-        for price, quantity in hourly_bid.price_quantity_pairs[1:]:
-            if quantity >= 0:
-                # demand step
-                step_id_2_simple_bid[count] = (prev_prc, prev_qnt - quantity)
-                prev_prc = price
-            elif prev_qnt > 0:
-                # first supply step
-                step_id_2_simple_bid[count] = (prev_prc, prev_qnt)
-                count += 1
-                step_id_2_simple_bid[count] = (price, quantity)
-            else:
-                # supply step
-                step_id_2_simple_bid[count] = (price, quantity - prev_qnt)
-            prev_qnt = quantity
-            count += 1
-    return {step_id: simple_bid for step_id, simple_bid in step_id_2_simple_bid.items() if abs(simple_bid[1]) > 0}
+def calculate_block_bid_surplus(block_bid, market_clearing_prices):
+    return sum([q * (block_bid.price - market_clearing_prices[t]) for t, q in enumerate(block_bid.quantities)])
 
 
-def is_accepted_block_bid_pab(bid, mcp):
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        return bid.price > mcp_avg + dc.PRICE_COMP_TOL
-    else:
-        return bid.price < mcp_avg - dc.PRICE_COMP_TOL
+def calculate_block_bid_family_surplus(
+        accepted_block_bid_ids, block_bid, block_bid_id_2_child_block_bids, market_clearing_prices):
+    surplus = calculate_block_bid_surplus(block_bid, market_clearing_prices)
+    child_block_bids = block_bid_id_2_child_block_bids[block_bid.bid_id]
+    surplus += calculate_surplus_of_child_block_bids(
+        accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids, market_clearing_prices)
+    return surplus
 
 
-def is_rejected_block_bid_prb(bid, mcp):
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        return bid.price < mcp_avg - dc.PRICE_COMP_TOL
-    else:
-        return bid.price > mcp_avg + dc.PRICE_COMP_TOL
+def calculate_surplus_of_child_block_bids(
+        accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids, market_clearing_prices):
+    surplus = 0.0
+    for block_bid_ in child_block_bids:
+        if block_bid_.bid_id not in accepted_block_bid_ids:
+            continue
+        surplus += calculate_block_bid_surplus(block_bid_, market_clearing_prices)
+        child_block_bids_ = block_bid_id_2_child_block_bids[block_bid_.bid_id]
+        if not child_block_bids_:
+            continue
+        surplus += calculate_surplus_of_child_block_bids(
+            accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids_, market_clearing_prices)
+    return surplus
+
+def interpolate(p_start, q_start, p_end, q_end, p=None, q=None):
+    assert p is not None or q is not None, "either 'p' or 'q' must be given to determine the interpolated point"
+    if p is not None:
+        assert p_start != p_end
+        w = (p - p_start) / (p_end - p_start)
+        return q_start + (q_end - q_start) * w
+    assert q_start != q_end
+    w = (q - q_start) / (q_end - q_start)
+    return p_start + (p_end - p_start) * w
+
+
+def is_accepted_block_bid_pab(
+        block_bid, market_clearing_prices, block_bid_id_2_child_block_bids, accepted_block_bid_ids):
+    surplus = calculate_block_bid_surplus(block_bid, market_clearing_prices)
+    if surplus >= -dc.PAB_PRB_SURPLUS_TOL:
+        return False
+    child_block_bids = block_bid_id_2_child_block_bids[block_bid.bid_id]
+    surplus += calculate_surplus_of_child_block_bids(
+        accepted_block_bid_ids, block_bid_id_2_child_block_bids, child_block_bids, market_clearing_prices)
+    return surplus < -dc.PAB_PRB_SURPLUS_TOL
+
+
+def is_rejected_block_bid_prb(
+        block_bid, market_clearing_prices, accepted_block_bid_ids, exclusive_group_id_2_block_bid_ids):
+    # child bids do not count as prb even if their parent bids are accepted (Turkish market rule)
+    if block_bid.link is not None:
+        return False
+    surplus = calculate_block_bid_surplus(block_bid, market_clearing_prices)
+    if surplus <= dc.PAB_PRB_SURPLUS_TOL:
+        return False
+    # check if another bid is accepted from the same group (e.g. mutually exclusive block bids and flexible bids)
+    exclusive_group_id = block_bid.exclusive_group_id
+    mutually_exclusive_block_bid_ids = exclusive_group_id_2_block_bid_ids[exclusive_group_id] if exclusive_group_id \
+        is not None else []
+    # if another bid from the same group is accepted, then this bid is not PRB
+    if set(mutually_exclusive_block_bid_ids).intersection(accepted_block_bid_ids):
+        return False
+    return True
 
 
 def calculate_bigm_for_block_bid_loss(block_bid, max_price=2000, min_price=0):
     if block_bid.is_supply:
-        return abs((block_bid.price - min_price) * block_bid.quantity * block_bid.num_period)
+        return abs((block_bid.price - min_price) * block_bid.total_quantity)
     # if demand
-    return abs((max_price - block_bid.price) * block_bid.quantity * block_bid.num_period)
+    return abs((max_price - block_bid.price) * block_bid.total_quantity)
 
 
 def calculate_bigm_for_block_bid_missed_surplus(block_bid, max_price=2000, min_price=0):
     if block_bid.is_supply:
-        return abs((max_price - block_bid.price) * block_bid.quantity * block_bid.num_period)
+        return abs((max_price - block_bid.price) * block_bid.total_quantity)
     # if demand
-    return abs((block_bid.price - min_price) * block_bid.quantity * block_bid.num_period)
+    return abs((block_bid.price - min_price) * block_bid.total_quantity)
 
 
 def do_block_bids_have_common_period(this_block_bid, that_block_bid):
@@ -86,26 +94,30 @@ def do_block_bids_have_common_period(this_block_bid, that_block_bid):
     return len(set(this_block_bid_periods).intersection(set(that_block_bid_periods))) > 0
 
 
-def find_pabs(market_clearing_prices, accepted_block_bid_ids, bid_id_2_block_bid):
+def find_pabs(market_clearing_prices, accepted_block_bid_ids, bid_id_2_block_bid, block_bid_id_2_child_block_bids):
     pabs = []
     for accepted_block_bid_id in accepted_block_bid_ids:
         accepted_block_bid = bid_id_2_block_bid[accepted_block_bid_id]
-        if is_accepted_block_bid_pab(accepted_block_bid, market_clearing_prices):
+        if is_accepted_block_bid_pab(
+                accepted_block_bid, market_clearing_prices, block_bid_id_2_child_block_bids, accepted_block_bid_ids):
             pabs.append(accepted_block_bid)
     return pabs
 
 
-def find_prbs(market_clearing_prices, rejected_block_bid_ids, bid_id_2_block_bid):
+def find_prbs(
+        market_clearing_prices, rejected_block_bid_ids, bid_id_2_block_bid, accepted_block_bid_ids, 
+        exclusive_group_id_2_block_bid_ids):
     prbs = []
     for rejected_block_bid_id in rejected_block_bid_ids:
         rejected_block_bid = bid_id_2_block_bid[rejected_block_bid_id]
-        if is_rejected_block_bid_prb(rejected_block_bid, market_clearing_prices):
+        if is_rejected_block_bid_prb(
+                rejected_block_bid, market_clearing_prices, accepted_block_bid_ids, 
+                exclusive_group_id_2_block_bid_ids):
             prbs.append(rejected_block_bid)
     return prbs
 
 
 def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-
     if pab.is_supply:
         variables, coefficients, rhs = create_gcut_for_supply_pab(
             pab, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
@@ -115,14 +127,17 @@ def create_gcut_for_pab(pab, accepted_block_bid_ids, rejected_block_bid_ids, bid
     return variables, coefficients, rhs
 
 
-def create_gcut_for_prb(prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-
+def create_gcut_for_prb(
+        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+        exclusive_group_id_2_block_bid_ids):
     if prb.is_supply:
         variables, coefficients, rhs = create_gcut_for_supply_prb(
-            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
+            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+            exclusive_group_id_2_block_bid_ids)
     else:
         variables, coefficients, rhs = create_gcut_for_demand_prb(
-            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var)
+            prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+            exclusive_group_id_2_block_bid_ids)
     return variables, coefficients, rhs
 
 
@@ -153,12 +168,21 @@ def create_gcut_for_supply_pab(
 
 
 def create_gcut_for_supply_prb(
-        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-    variables = [bid_id_2_bbid_var[prb.bid_id]]
-    coefficients = [1]
+        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+        exclusive_group_id_2_block_bid_ids):
+    exclusive_group_id = prb.exclusive_group_id
+    mutually_exclusive_block_bid_ids = exclusive_group_id_2_block_bid_ids[exclusive_group_id] if exclusive_group_id \
+        is not None else []
+    if mutually_exclusive_block_bid_ids:
+        variables = [bid_id_2_bbid_var[bid_id] for bid_id in mutually_exclusive_block_bid_ids]
+        coefficients = [1] * len(variables)
+    else:
+        variables = [bid_id_2_bbid_var[prb.bid_id]]
+        coefficients = [1]
     rhs = 1
     rejected_supply_block_bid_ids = [
-        bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id and bid_id_2_block_bid[bid_id].is_supply]
+        bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id and bid_id_2_block_bid[bid_id].is_supply 
+        and bid_id not in mutually_exclusive_block_bid_ids]
     accepted_demand_block_bid_ids = [
         bid_id for bid_id in accepted_block_bid_ids if bid_id != prb.bid_id and 
         not bid_id_2_block_bid[bid_id].is_supply]
@@ -168,7 +192,6 @@ def create_gcut_for_supply_prb(
         if do_block_bids_have_common_period(prb, block_bid):
             variables.append(bid_id_2_bbid_var[bbid_id])
             coefficients.append(1)
-
     # find intersecting accepted demand block bids
     for bbid_id in accepted_demand_block_bid_ids:
         block_bid = bid_id_2_block_bid[bbid_id]
@@ -206,13 +229,21 @@ def create_gcut_for_demand_pab(
 
 
 def create_gcut_for_demand_prb(
-        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var):
-    variables = [bid_id_2_bbid_var[prb.bid_id]]
-    coefficients = [1]
+        prb, accepted_block_bid_ids, rejected_block_bid_ids, bid_id_2_block_bid, bid_id_2_bbid_var, 
+        exclusive_group_id_2_block_bid_ids):
+    exclusive_group_id = prb.exclusive_group_id
+    mutually_exclusive_block_bid_ids = exclusive_group_id_2_block_bid_ids[exclusive_group_id] if exclusive_group_id \
+        is not None else []
+    if mutually_exclusive_block_bid_ids:
+        variables = [bid_id_2_bbid_var[bid_id] for bid_id in mutually_exclusive_block_bid_ids]
+        coefficients = [1] * len(variables)
+    else:
+        variables = [bid_id_2_bbid_var[prb.bid_id]]
+        coefficients = [1]
     rhs = 1
     rejected_demand_block_bid_ids = [
         bid_id for bid_id in rejected_block_bid_ids if bid_id != prb.bid_id and 
-        not bid_id_2_block_bid[bid_id].is_supply]
+        not bid_id_2_block_bid[bid_id].is_supply and bid_id not in mutually_exclusive_block_bid_ids]
     accepted_supply_block_bid_ids = [
         bid_id for bid_id in accepted_block_bid_ids if bid_id != prb.bid_id and bid_id_2_block_bid[bid_id].is_supply]
     # find intersecting rejected demand block bids
@@ -231,47 +262,41 @@ def create_gcut_for_demand_prb(
     return variables, coefficients, rhs
 
 
-def get_pab_info(bid, mcp):
-    """Returns (True, price_gap, loss) tuple if the bid is a pab, otherwise (False, 0, 0)"""
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        if bid.price > mcp_avg + dc.PRICE_COMP_TOL:
-            return True, bid.price - mcp_avg, (mcp_avg - bid.price) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
-    else:
-        if bid.price < mcp_avg - dc.PRICE_COMP_TOL:
-            return True, mcp_avg - bid.price, (mcp_avg - bid.price) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
+def get_pab_info(block_bid, mcp, block_bid_id_2_child_block_bids, accepted_block_bid_ids):
+    """Returns (True, price_gap, loss) tuple if the accepted block bid is a PAB, otherwise (False, 0, 0)"""
+    mcp_avg = sum([q * mcp[t] for t, q in enumerate(block_bid.quantities)]) / block_bid.total_quantity if \
+        abs(block_bid.total_quantity) > 0 else 0.0
+    surplus = calculate_block_bid_family_surplus(
+        accepted_block_bid_ids, block_bid, block_bid_id_2_child_block_bids, mcp)
+    if surplus > -dc.PAB_PRB_SURPLUS_TOL:
+        return False, 0, 0
+    price_gap = block_bid.price - mcp_avg if block_bid.is_supply else mcp_avg - block_bid.price
+    return True, price_gap, -surplus
 
 
-def get_prb_info(bid, mcp):
-    """Returns (True, price_gap, missed_surplus) tuple if the bid is a prb, otherwise (False, 0, 0)"""
-    first = bid.period - 1
-    last = bid.period+bid.num_period-1
-    mcp_block = mcp[first:last]
-    mcp_avg = sum(mcp_block)/len(mcp_block)
-    if bid.is_supply:
-        if bid.price < mcp_avg - dc.PRICE_COMP_TOL:
-            return True, mcp_avg - bid.price, (bid.price - mcp_avg) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
-    else:
-        if bid.price > mcp_avg + dc.PRICE_COMP_TOL:
-            return True, bid.price - mcp_avg, (bid.price - mcp_avg) * bid.quantity * len(mcp_block)
-        else:
-            return False, 0, 0
+def get_prb_info(block_bid, mcp):
+    """Returns (True, price_gap, missed_surplus) tuple if the rejected block bid is a PRB, otherwise (False, 0, 0)"""
+    mcp_avg = sum([q * mcp[t] for t, q in enumerate(block_bid.quantities)]) / block_bid.total_quantity if \
+        abs(block_bid.total_quantity) > 0 else 0.0
+    surplus = calculate_block_bid_surplus(block_bid, mcp)
+    if surplus < dc.PAB_PRB_SURPLUS_TOL:
+        return False, 0, 0
+    price_gap = mcp_avg - block_bid.price if block_bid.is_supply else block_bid.price - mcp_avg
+    return True, price_gap, surplus
 
 
-def generate_market_result_statistics(dam_bids, dam_solution):
-    """Generates the market result statistics, update the solution, and returns it"""
+def generate_market_result_statistics(dam_data, dam_solution):
+    """Generates the market result statistics, update the solution, and returns it
+    
+    'pab/prb' related statistics (e.g. price gap) does not cover the flexible bids and mutually exclusive block bids"""
+    dam_bids = dam_data.dam_bids
+    block_bid_id_2_child_block_bids = dam_data.block_bid_id_2_child_block_bids
+    original_dam_bids = dam_data.dam_original_bids
     # find the set of PABs and PRBs
     pabs = []
     prbs = []
+    pafs = []
+    prfs = []
     loss = 0
     missed_surplus = 0
     average_pab_price_gap = 0
@@ -279,35 +304,73 @@ def generate_market_result_statistics(dam_bids, dam_solution):
     average_prb_price_gap = 0
     prb_with_max_price_gap = None
 
-    for bid_id in dam_solution.accepted_block_bids:
+    for bid_id in dam_solution.accepted_block_bids + dam_solution.accepted_block_bids_from_flexible_bids:
         bid = dam_bids.bid_id_2_block_bid[bid_id]
-        pab, price_gap_, loss_ = get_pab_info(bid, dam_solution.market_clearing_prices)
+        pab, price_gap_, loss_ = get_pab_info(
+            bid, dam_solution.market_clearing_prices, block_bid_id_2_child_block_bids, 
+            dam_solution.accepted_block_bids)
         if not pab:
             continue
-        pabs.append(bid_id)
         loss += loss_
+        if bid.from_flexible:
+            pafs.append(bid.exclusive_group_id)
+            continue
+        else:
+            pabs.append(bid_id)
         average_pab_price_gap += price_gap_
         if not pab_with_max_price_gap or pab_with_max_price_gap[2] < price_gap_:
-            pab_with_max_price_gap = (abs(bid.quantity), bid.num_period, price_gap_)
+            pab_with_max_price_gap = (abs(bid.total_quantity) / bid.num_period, bid.num_period, price_gap_)
     average_pab_price_gap = (average_pab_price_gap / len(pabs)) if pabs else None
 
+    prf_bid_id_2_missed_surplus = {}
+    exclusive_group_id_2_missed_surplus = {}
     for bid_id in dam_solution.rejected_block_bids:
         bid = dam_bids.bid_id_2_block_bid[bid_id]
+        if bid.link is not None:
+            continue
         prb, price_gap_, missed_surplus_ = get_prb_info(bid, dam_solution.market_clearing_prices)
         if not prb:
+            continue
+        exclusive_group_id = bid.exclusive_group_id
+        if exclusive_group_id is not None:
+            if bid.from_flexible:
+                flexible_bid_id = bid.exclusive_group_id
+                if flexible_bid_id in dam_solution.rejected_flexible_bids:
+                    if flexible_bid_id not in prfs:
+                        prfs.append(flexible_bid_id)
+                        prf_bid_id_2_missed_surplus[flexible_bid_id] = missed_surplus_
+                    else:
+                        # missed surplus of a prf is the max of the missed surpluses corresponding to the single-period 
+                        # child block bids generated from the flexible bid
+                        prf_bid_id_2_missed_surplus[flexible_bid_id] = max(
+                            prf_bid_id_2_missed_surplus[flexible_bid_id], missed_surplus_)
+            else:
+                exclusive_group_id = bid.exclusive_group_id
+                if exclusive_group_id in dam_solution.rejected_mutually_exclusive_block_bid_group_ids:
+                    if exclusive_group_id in exclusive_group_id_2_missed_surplus:
+                        exclusive_group_id_2_missed_surplus[exclusive_group_id] = max(
+                            exclusive_group_id_2_missed_surplus[exclusive_group_id], missed_surplus_)
+                    else:
+                        # missed surplus of a mutually exclusive block bid group is the max of the missed surpluses 
+                        # corresponding to the individual block bids in the group
+                        exclusive_group_id_2_missed_surplus[exclusive_group_id] = missed_surplus_    
             continue
         prbs.append(bid_id)
         missed_surplus += missed_surplus_
         average_prb_price_gap += price_gap_
         if not prb_with_max_price_gap or prb_with_max_price_gap[2] < price_gap_:
-            prb_with_max_price_gap = (abs(bid.quantity), bid.num_period, price_gap_)
+            prb_with_max_price_gap = (abs(bid.total_quantity) / bid.num_period, bid.num_period, price_gap_)
     average_prb_price_gap = (average_prb_price_gap / len(prbs)) if prbs else None
+    missed_surplus += sum(prf_bid_id_2_missed_surplus.values())
+    missed_surplus += sum(exclusive_group_id_2_missed_surplus.values())
 
     # update the solution
     dam_solution.loss = loss
     dam_solution.missed_surplus = missed_surplus
     dam_solution.num_pab = len(pabs)
     dam_solution.num_prb = len(prbs)
+    dam_solution.num_paf = len(pafs)
+    dam_solution.num_prf = len(prfs)
     dam_solution.average_pab_price_gap = average_pab_price_gap
     dam_solution.average_prb_price_gap = average_prb_price_gap
     dam_solution.max_pab_price_gap = pab_with_max_price_gap[2] if pab_with_max_price_gap else None
@@ -323,14 +386,16 @@ def write_runners_to_file(runners, working_dir):
     file_path = os.path.join(working_dir, "tests.csv")
     with open(file_path, mode='w') as csv_file:
         fieldnames = [
-            'problem file', 'problem type', 'solver', 'method', 'time limit', 'relative gap tolerance', 'hourly bids',
-            'block bids', 'flexible bids', 'valid', 'total surplus', 'solver status', 'best bound', 'relative gap',
+            'problem file', 'problem type', 'solver', 'method', 'time limit', 'relative gap tolerance', 
+            'step hourly bids', 'piecewise hourly bids', 'block bids', 'linked block bids', 
+            'flexible bids', 'valid', 'total surplus', 'solver status', 'best bound', 'relative gap',
             'elapsed solver time', 'number of solutions', 'number of nodes', 'number of subproblems', 
             'number of user cuts', 'avg block bid num period', 'avg block bid quantity', 'num accepted block bids', 
-            'num rejected block bids', 'avg. mcp', 'num pab', 'num prb', 'loss', 'missed surplus', 
-            'avg pab price gap', 'max pab price gap', 'num periods for pab with max price gap', 
-            'quantity pab with max price gap', 'avg prb price gap', 'max prb price gap', 
-            'num periods for prb with max price gap', 'quantity prb with max price gap']
+            'num rejected block bids', 'num accepted flexible bids', 'num rejected flexible bids', 'avg. mcp', 
+            'num pab', 'num prb', 'num paf', 'num prf', 'loss', 'missed surplus', 
+            'avg pab price gap', 'max pab price gap', 'num periods of pab with max price gap', 
+            '(avg) quantity of pab with max price gap', 'avg prb price gap', 'max prb price gap', 
+            'num periods of prb with max price gap', '(avg) quantity of prb with max price gap']
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         for runner in runners:
@@ -346,8 +411,10 @@ def write_runners_to_file(runners, working_dir):
                 'method': runner.method().value,
                 'time limit': runner.time_limit(),
                 'relative gap tolerance': runner.relative_gap_tolerance(),
-                'hourly bids': input_stats.number_of_hourly_bids(),
+                'step hourly bids': input_stats.number_of_step_hourly_bids(),
+                'piecewise hourly bids': input_stats.number_of_piecewise_hourly_bids(),
                 'block bids': input_stats.number_of_block_bids(),
+                'linked block bids': input_stats.number_of_linked_block_bids(),
                 'flexible bids': input_stats.number_of_flexible_bids(),
                 'valid': False if dam_solution is None else dam_solution.is_valid,
                 'solver status': optimization_status.solver_status(),
@@ -367,19 +434,23 @@ def write_runners_to_file(runners, working_dir):
                         'total surplus': dam_solution.total_surplus,
                         'num accepted block bids': len(dam_solution.accepted_block_bids),
                         'num rejected block bids': len(dam_solution.rejected_block_bids),
+                        'num accepted flexible bids': len(dam_solution.accepted_flexible_bids),
+                        'num rejected flexible bids': len(dam_solution.rejected_flexible_bids),
                         'avg. mcp': np.mean(dam_solution.market_clearing_prices),
                         'num pab': dam_solution.num_pab, 
-                        'num prb': dam_solution.num_prb, 
+                        'num prb': dam_solution.num_prb,
+                        'num paf': dam_solution.num_paf, 
+                        'num prf': dam_solution.num_prf, 
                         'loss': dam_solution.loss, 
                         'missed surplus': dam_solution.missed_surplus, 
                         'avg pab price gap': dam_solution.average_pab_price_gap, 
                         'max pab price gap': dam_solution.max_pab_price_gap, 
-                        'num periods for pab with max price gap': dam_solution.num_periods_for_pab_with_max_price_gap, 
-                        'quantity pab with max price gap': dam_solution.quantity_pab_with_max_price_gap,
+                        'num periods of pab with max price gap': dam_solution.num_periods_for_pab_with_max_price_gap, 
+                        '(avg) quantity of pab with max price gap': dam_solution.quantity_pab_with_max_price_gap,
                         'avg prb price gap': dam_solution.average_prb_price_gap, 
                         'max prb price gap': dam_solution.max_prb_price_gap, 
-                        'num periods for prb with max price gap': dam_solution.num_periods_for_prb_with_max_price_gap, 
-                        'quantity prb with max price gap': dam_solution.quantity_prb_with_max_price_gap
+                        'num periods of prb with max price gap': dam_solution.num_periods_for_prb_with_max_price_gap, 
+                        '(avg) quantity of prb with max price gap': dam_solution.quantity_prb_with_max_price_gap
                     }
                 )
             writer.writerow(row)
