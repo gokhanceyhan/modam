@@ -1,13 +1,15 @@
 .DS_Store
 *.txt
-*.csv
 *.log
 *.pyc
 *.lp
 *.mps
 *.prm
 *.sol
+logs/
+results/
 venv/
 modam_venv/
 .idea/
 .vscode/
+_*.py

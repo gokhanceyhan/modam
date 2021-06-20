@@ -263,7 +263,6 @@ class DamData:
         """Reads input data in the specified path and creates the bid set"""
         # read data as a data frame
         df = pd.read_csv(file_path, dtype=DamData._FIELD_NAME_2_DATA_TYPE)
-        df = df.iloc[:, 4:]
         end_period_column_exists = dc.DAM_DATA_BID_END_PERIOD_HEADER in df.columns
         exclusive_group_column_exists = dc.DAM_DATA_BID_EXCLUSIVE_GROUP_ID_HEADER in df.columns
         # define bid maps
