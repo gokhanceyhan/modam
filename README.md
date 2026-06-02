@@ -36,11 +36,45 @@ export PYTHONPATH="${PYTHONPATH}:."
 pip install -r requirements.txt
 ```
 
-### Run help to see the usage of the command line app
+### Run the surplus maximization solver
+
+Run the solver with:
 ```
-python ./modam/apps/surplus_max_solver --help
+python ./modam/apps/surplus_max_solver -d <data_file_path> -w <working_dir> -m Benders|PrimalDual|BranchAndBound -s Cplex|Gurobi|Scip [-r single|batch] [-t <time_limit>] [-g <mip_rel_gap>] [-n <num_threads>] [-p <problem_type>]
 ```
 
-## Multi-objective version: Surplus maximization problem under market loss or missed surplus constraints
+Options:
+- `-d`: Path to CSV data file or directory (for batch mode)
+- `-w`: Working directory for outputs
+- `-m`: Solution method: `Benders`, `PrimalDual`, or `BranchAndBound`
+- `-s`: Solver: `Cplex`, `Gurobi`, or `Scip` (BranchAndBound requires Scip)
+- `-r`: Run mode: `single` (default) or `batch`
+- `-t`: Time limit in seconds (default: 600)
+- `-g`: MIP relative gap tolerance (default: 1e-6)
+- `-n`: Number of threads (default: 1)
+- `-p`: Problem type: `Unrestricted`, `NoPab`, or `NoPrb`
 
-The multi-objective version of the algorithm is still in-progress and the necessary instructions for its use will be announced later.
+Example:
+```
+python ./modam/apps/surplus_max_solver -d instances/real_size/r1.csv -w ./results -m Benders -s Gurobi -r single -t 600
+```
+
+## Multi-objective version: Surplus maximization vs market loss and missed surplus minimization
+
+Run the multi-objective solver with:
+```
+python ./modam/apps/modam_solver -d <data_file_path> -w <working_dir> [-p <mip_params_file>] [-P <lp_params_file>] [-r single|batch] [-s Gurobi]
+```
+
+Options:
+- `-d`: Path to CSV data file or directory (for batch mode)
+- `-w`: Working directory for outputs
+- `-r`: Run mode: `single` (default) or `batch`
+- `-p`: Optional MIP solver parameters file (.prm)
+- `-P`: Optional LP solver parameters file (.prm)
+- `-s`: Solver to use (default: Gurobi)
+
+Example:
+```
+python ./modam/apps/modam_solver -d instances/real_size/r1.csv -w ./results -r single
+```
